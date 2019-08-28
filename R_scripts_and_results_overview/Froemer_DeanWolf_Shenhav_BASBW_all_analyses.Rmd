@@ -1,0 +1,2127 @@
+---
+title: "Goal congruency dominates reward value in accounting for behavioral and neural correlates of value-based decision-making"
+author: "Romy Froemer"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    theme: default
+    toc: yes
+    toc_float: yes
+  editor_options:
+    chunk_output_type: console
+---
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, comment = NA, message = FALSE, warning = FALSE, R.options = list(width = 60), cache = FALSE, tidy.opts = list(width.cutoff = 60), tidy = TRUE, dev = c("png", "pdf"), dpi = 150)
+```
+
+```{r echo=TRUE}
+library(R.matlab)
+library(rlang)
+library(languageR)
+library(lme4)
+library(MASS)
+library(ggplot2) #cookbook for R/ Graphs
+library(hexbin)
+library(memisc)
+library(reshape)
+library(reshape2) #melt and cast -> restructure and aggregate data
+library(data.table)
+library(coin) #for permutation tests
+library(psych)
+library(doBy)
+library(heplots)
+library(plyr) #necessary for ddply
+library(matrixStats) 
+library(foreign) 
+library(Hmisc)
+#library(lmerTest) # fucks with tab_model in sjPlot, so I don't use that anymore.
+library (stringr)
+library(gridExtra)
+library(grid)
+library(gdata)
+library(effects)
+library(ggExtra)
+library("piecewiseSEM")
+library(ordinal)
+library(simr)
+library(sjPlot)
+library(htmlTable)
+library(lmerTest)
+detach("package:lmerTest", unload = TRUE)
+setwd("/Users/Romy/Dropbox (Brown)/ShenhavLab/Experiments/bas/Analysis/HDDM/LMMGLMR")
+source("/Users/Romy/Beruflich/R-funcs/summarySEwithinO.R")
+source("/Users/Romy/Beruflich/R-funcs/summarySE.R")
+source("/Users/Romy/Beruflich/R-funcs/normDataWithin.R")
+source("/Users/Romy/Beruflich/R-funcs/multiplot.R")
+```
+
+Loading all data 
+
+```{r echo=TRUE}
+
+### Study 1: choose best/ choose worst behavioral
+input_file = '/Users/Romy/Dropbox (Brown)/ShenhavLab/Experiments/bas/Analysis/HDDM/BASB_108Data_041118.xls'
+a1 = read.xls(input_file)
+
+
+### Study 2: fMRI
+input_file = '~/Dropbox (Brown)/ShenhavLab/Experiments/bas/Analysis/BASB_508Data_040918.xls' # 508 data
+
+a1fMRI = read.xls(input_file)
+
+## BARTRA ROI
+input_file = '~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/BASB_508BARTRAROIData_053118.xls'
+
+BAROI = read.xls(input_file)
+
+## vStr and vmPFC from BARTRA
+input_file = '~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/BASB_508BARTRAROIsubRegData_112118.xls'
+
+BAROIsub = read.xls(input_file)
+
+## SEED ROIs within vStr
+input_file = '~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/BASB_508_left_righ_Str_ROIS.xls'
+
+SEEDROIS = read.xls(input_file)
+
+## ROI of OVr activation
+input_file = '~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/BASB_508_OVr_ROI.xls'
+
+OVrROI = read.xls(input_file)
+
+# Shenhav & Buckner (2014) ROIs for PCC 
+input_file = '~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/BASB_508ROIData_053118.xls' 
+
+ROI = read.xls(input_file)
+
+# vmPFC subregions Shenhav & Karmarkar (2019)
+input_file = '~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/VMPFC_OFC_ROI.xls' 
+
+VMPFCROI = read.xls(input_file)
+
+### Study 0: choose best only
+input_file = '/Users/Romy/Dropbox (Brown)/ShenhavLab/Experiments/bas/Analysis/HDDM/BASB_105Data_150318.xls' 
+a0 = read.xls(input_file)
+
+### Study 3: choose worst only
+input_file = '/Users/Romy/Dropbox (Brown)/ShenhavLab/Experiments/bas/Analysis/HDDM/BASB_106Data_03222018.xls' 
+a2 = read.xls(input_file)
+
+### Study 4: choose best/ choose worst - incentivized
+input_file = '/Users/Romy/Dropbox (Brown)/ShenhavLab/Experiments/bas/Analysis/BASB_118Data_072619.xls'
+
+a118 = read.xls(input_file)
+
+
+```
+
+
+# Study 1: best vs worst within subject
+
+data prep
+
+```{r echo=TRUE}
+# 1: center covariates
+a1$cgoalvAvRemBid <- scale(a1$goalvAvRemBid/10, center=TRUE, scale = FALSE)                  ## unsigned value difference (max/min vs average remaining)
+a1$cgoalvNext <- scale(a1$goalvNext, center=TRUE, scale = FALSE)
+a1$cAvBid <- scale(a1$AvBid/10, center=TRUE, scale = FALSE)
+a1$cRT <- scale(a1$logRT, center=TRUE, scale=FALSE)
+#a1$cChosenvAvRemV <- scale(a1$ChosenvAvRemV, center= TRUE, scale=FALSE)
+a1$Liking <- scale(a1$tmpAllLrateAllTrials, scale=FALSE, center=TRUE)
+a1$avGoalValue <- a1$AvBid                                                                ## the value of the set relative to the goal
+a1$avGoalValue[a1$isChooseBestTrial==0] <- (a1$AvBid [a1$isChooseBestTrial==0]*-1) +10
+a1$cavGoalValue <- scale(a1$avGoalValue/10, scale=FALSE, center= TRUE)
+a1$goalChosenV <- a1$ChosenV                                                              ## the value of the chosen Item relativ to goal
+a1$goalChosenV[a1$isChooseBestTrial==0] <- (a1$ChosenV[a1$isChooseBestTrial==0]*-1) +10
+a1$cgoalChosenV <- scale(a1$goalChosenV, scale=FALSE, center= TRUE)
+a1$cChosenV <- scale(a1$ChosenV, scale=FALSE, center=TRUE)
+a1$avUnchV <- a1$SumUnchV/3                                                               ## average of the unchosen values
+a1$cavUnchV <- scale(a1$avUnchV, scale=FALSE, center=TRUE)
+a1$avgoalUnchV <- a1$avUnchV                                                              ## average of unchosen values relative to goal
+a1$avgoalUnchV[a1$isChooseBestTrial==0] <- (a1$avUnchV[a1$isChooseBestTrial==0]*-1) +10
+a1$cavgoalUnchV <- scale(a1$avgoalUnchV, scale=FALSE, center=TRUE)
+a1$relGoalvAvRem <- a1$goalChosenV - a1$avgoalUnchV                                       ## goal related chosen vs unchosen (negative Values are suboptimal choices) 
+a1$crelGoalvAvRem <- scale(a1$relGoalvAvRem/10, scale=FALSE, center=TRUE)
+a1$goalVal <- a1$MaxBid
+a1$goalVal[a1$isChooseBestTrial==0] <- a1$MinBid[a1$isChooseBestTrial==0]
+a1$cgoalVal <- scale(a1$goalVal, scale=FALSE, center=TRUE)                               ## goal Value (best matching value in set relative to goal)
+a1$rewSpgoalvAvRem <- a1$goalVal - a1$avUnchV                                            ## goal v av rem in bid space
+a1$crewSpgoalvAvRem <- scale(a1$rewSpgoalvAvRem/10, scale=FALSE, center=TRUE) 
+a1$Prgoalcons <- a1$goalVal
+a1$Prgoalcons[a1$isChooseBestTrial==0] <- 10 - a1$MinBid[a1$isChooseBestTrial==0]        ## this is a terrible variable name, but that's the revalued goal value
+a1$cChosenvAvRemV <- scale(a1$ChosenvAvRemV/10, scale=FALSE, center=TRUE)   
+a1$chosenvsnext <- a1$ChosenV - a1$allTrProdBid2
+
+# 2: make categorical predictors factors and set contrasts
+a1$subj_idx <- as.factor(a1$subj_idx)
+a1$isChooseBestTrial <- as.factor(a1$isChooseBestTrial)
+contrasts(a1$isChooseBestTrial) <- contr.sdif(2)
+a1$block <- rep(1, length(a1$subj_idx))
+a1$block[a1$Trial > 60] <- 2
+a1$block <- as.factor(a1$block)
+contrasts(a1$block) <- contr.sdif(2)
+a1$CondType <- as.factor(a1$CondType)
+a1$CondType <- revalue(a1$CondType, c("1"="mixed", "2"="low", "3"="medium", "4"="high"))
+
+
+## exclude trials with RT longer than 15s
+as <- a1
+a1 <- a1[a1$rt<15,]
+
+``` 
+
+## accuracy  
+We analyzed choice consistency as a function of Overall Value, Value Difference, Task goal, and also tested for an interaction of Value Difference with Task goal, to see whether participants were more sensitive to value information in either condition.
+
+```{r echo=TRUE}
+BWaccmod0t1 <- glmer(response~ cgoalvAvRemBid*isChooseBestTrial+cAvBid+(isChooseBestTrial|subj_idx), data = a1[!a1$goalvNext==0,], #
+                                  family = binomial) 
+
+sv1_max <- svd(getME(BWaccmod0t1, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+```
+
+```{r echo=TRUE}
+
+tab_model(BWaccmod0t1, transform= NULL ,show.stat = TRUE, string.stat="z",   dv.labels = c("P(Goal Chosen)"), pred.labels= c("(Intercept)", "Value Difference","Best - Worst Conditon", "Overall Value", "Value Difference:Best - Worst Conditon"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+There was no significant interaction, so we excluded the interaction term.
+
+```{r echo=TRUE}
+BWaccmod0 <- glmer(response~ cgoalvAvRemBid+isChooseBestTrial+cAvBid+(isChooseBestTrial|subj_idx), data = a1[!a1$goalvNext==0,], #
+                                  family = binomial)
+
+sv1_max <- svd(getME(BWaccmod0, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+```
+
+```{r echo=TRUE}
+tab_model(BWaccmod0, transform= NULL ,show.stat = TRUE, string.stat="z",   dv.labels = c("P(Goal Chosen)"), pred.labels= c("(Intercept)", "Value Difference","Best - Worst Conditon", "Overall Value"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"),BWaccmod0, xlevels=list(cgoalvAvRemBid=seq(min(a1$cgoalvAvRemBid), max(a1$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+IA$cgoalvAvRemBid <- (IA$cgoalvAvRemBid - min(IA$cgoalvAvRemBid))*10
+
+## with CI instead of se
+pBWacc <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cgoalvAvRemBid, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous( expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("value difference") + ylab("Pr(goal chosen)") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.justification=c(1,0), legend.position=c(0.95,0.05))
+pBWacc 
+```
+
+```{r echo=TRUE}
+pdf("/Users/Romy/Dropbox (Brown)/ShenhavLab/Experiments/bas/Analysis/HDDM/best_worst_within_main_accuracy_w_choice_condition_as_color.pdf", width = 4, height = 4)#, units = 'cm', res = 200, compression = 'lzw'
+pBWacc 
+dev.off()
+
+
+
+
+S1BWaccmod0G <- glmer(response~ cgoalvAvRemBid*isChooseBestTrial+cavGoalValue+(isChooseBestTrial|subj_idx), data = a1[!a1$goalvNext==0,], 
+                                  family = binomial) 
+
+sv1_max <- svd(getME(S1BWaccmod0G, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(S1BWaccmod0G, transform= NULL ,show.stat = TRUE, string.stat="z",   dv.labels = c("P(Goal Chosen)"), pred.labels= c("(Intercept)", "Value Difference","Best - Worst Conditon", "Overall Goal Value", "Value Difference:Best - Worst Conditon"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+In summary, choice consistency was only sensitive to value difference.  
+***
+
+## rt  
+
+> Basic checks  
+
+```{r echo=TRUE}
+# make table of RT by task
+
+meanRTbySubS1 <- ddply(a1, .(subj_idx, isChooseBestTrial), summarise,
+                  mrt    = median(rt, na.rm=TRUE))
+
+meanRTDiff <-  meanRTbySubS1$mrt[meanRTbySubS1$isChooseBestTrial==0] -  meanRTbySubS1$mrt[meanRTbySubS1$isChooseBestTrial==1]
+
+ggplot(meanRTbySubS1, aes(isChooseBestTrial,mrt,  color= isChooseBestTrial)) + geom_violin()+geom_boxplot() + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+
+
+ggplot(a1, aes(rt, group =isChooseBestTrial, color=isChooseBestTrial, fill=isChooseBestTrial)) + geom_density(alpha=0.5) + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+```
+
+> run analyses separately for best and worst before putting all in one model  
+
+```{r echo=TRUE}
+
+BWRTmod1bBEST <- lmer(logRT~ cgoalvAvRemBid+cAvBid+(cgoalvAvRemBid|subj_idx), data = a1[a1$isChooseBestTrial==1,],
+                                     REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod1bBEST, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+
+BWRTmod1bWORST <- lmer(logRT~ cgoalvAvRemBid+cAvBid+(cgoalvAvRemBid|subj_idx), data = a1[a1$isChooseBestTrial==0,],
+                                      REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod1bWORST, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(BWRTmod1bBEST,BWRTmod1bWORST, p.val= "kr", show.df = T, transform= NULL ,show.stat = TRUE, string.stat="t",   dv.labels = c("log RT Best", "log RT worst"),pred.labels= c("(Intercept)", "Value Difference", "Overall Value"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+```
+
+> All data: standard analysis with Overall and Relative Value, plus main effect, but no interaction with choice goal  
+
+```{r echo=TRUE}
+# all data no interaction
+BWRTmod0 <- lmer(logRT~ cgoalvAvRemBid+cAvBid+isChooseBestTrial+(isChooseBestTrial|subj_idx), data = a1,
+                                 REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod0, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(BWRTmod0,p.val= "kr", show.df = T, transform= NULL ,show.stat = TRUE, string.stat="t",   dv.labels = c("log RT"),pred.labels= c("(Intercept)", "Value Difference", "Overall Value", "Best - Worst Condition"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+
+> All data: adding interaction of Overall Value with Choice goal  
+
+```{r echo=TRUE}
+# all data with interaction
+BWRTmod1b <- lmer(logRT~ cgoalvAvRemBid+cAvBid*isChooseBestTrial+(isChooseBestTrial|subj_idx), data = a1,
+                                 REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod1b, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(BWRTmod1b,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Value Difference", "Overall Value", "Best - Worst Condition", "Overall Value: Best - Worst"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> Nested model to get Overall Value effects for each choice goal  
+
+```{r echo=TRUE}
+## nested model
+BWRTmod1bn <- lmer(logRT~ isChooseBestTrial/(cAvBid)+cgoalvAvRemBid+(isChooseBestTrial|subj_idx), data = a1,
+                                  REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod1bn, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+
+tab_model(BWRTmod1bn,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Best - Worst Condition", "Value Difference", "Worst: Overall Value", "Best: Overall Value"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+
+**Figure 1 C overlay part 1**  
+
+
+```{r echo=TRUE}
+
+eff_df <- Effect(c("cAvBid", "isChooseBestTrial"), BWRTmod1b)
+IA <- as.data.frame(eff_df)
+IA$cAvBid <- (IA$cAvBid - min(IA$cAvBid))*10
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pASVBW <- ggplot(data=IA, aes(x=cAvBid, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cAvBid, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0.8, 2.1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Overall value") + ylab(" ") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+ theme(legend.justification=c(1,1), legend.position=c(0.95,0.25) )
+
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"), BWRTmod1b, xlevels=list(cgoalvAvRemBid=seq(min(a1$cgoalvAvRemBid), max(a1$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+IA$cgoalvAvRemBid <- (IA$cgoalvAvRemBid - min(IA$cgoalvAvRemBid))*10
+## with CI instead of se
+pVDBW <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cgoalvAvRemBid, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0.8, 2.1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Relative Value") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+ theme(legend.position="none" )
+multiplot(pVDBW, pASVBW,  cols=2)
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/HDDM/best_worst_within_allRS.pdf", width = 8, height = 4)#, units = 'cm', res = 200, compression = 'lzw'
+multiplot(pVDBW, pASVBW,  cols=2)
+dev.off()
+```
+
+> Modeling goal congruency instead of reward value
+
+```{r echo=TRUE}
+## goal value instead of AvBid
+BWRTmod1g <- lmer(logRT~ cgoalvAvRemBid+cavGoalValue+isChooseBestTrial+(isChooseBestTrial|subj_idx), data = a1,
+                                 REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod1g, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+
+tab_model(BWRTmod1g,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Value Difference", "Overall Goal Value", "Best - Worst Condition"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+
+```{r echo=TRUE}
+
+eff_df <- Effect(c("cavGoalValue", "isChooseBestTrial"), BWRTmod1g)
+IA <- as.data.frame(eff_df)
+IA$cavGoalValue <- (IA$cavGoalValue - min(IA$cavGoalValue))*10
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pASVBW <- ggplot(data=IA, aes(x=cavGoalValue, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cavGoalValue, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0.8, 2.1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Overall value") + ylab(" ") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.justification=c(1,1), legend.position=c(0.95,0.25))
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"), BWRTmod1g, xlevels=list(cgoalvAvRemBid=seq(min(a1$cgoalvAvRemBid), max(a1$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cgoalvAvRemBid <- (IA$cgoalvAvRemBid - min(IA$cgoalvAvRemBid))*10
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pVDBW <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cgoalvAvRemBid, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0.8, 2.1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Relative Value") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="none" )
+multiplot( pVDBW,pASVBW, cols=2)
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/HDDM/best_worst_within_allGS.pdf", width = 8, height = 4)#, units = 'cm', res = 200, compression = 'lzw'
+multiplot( pVDBW,pASVBW, cols=2)
+dev.off()
+```
+
+
+> test for residual OV effects
+
+```{r echo=TRUE}
+BWRTmod1allin <- lmer(logRT~ cgoalvAvRemBid+cavGoalValue+ cAvBid+isChooseBestTrial+(isChooseBestTrial|subj_idx), data = a1,
+                                 REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod1allin, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+
+tab_model(BWRTmod1allin,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Value Difference", "Overall Goal Value", "Overall Reward Value", "Best - Worst Condition"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> Model comparison
+
+**Table 2 part 1**  
+
+
+```{r echo=TRUE}
+# simplest model with only VD
+BWRTmodbase <- lmer(logRT~ cgoalvAvRemBid+isChooseBestTrial+(isChooseBestTrial|subj_idx), data = a1,
+                                     REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmodbase, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+
+tab_model(BWRTmodbase,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Value Difference", "Best - Worst Condition"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+xxx <- anova(BWRTmod0, BWRTmod1b, BWRTmod1g, BWRTmodbase)
+row.names(xxx) <- c("VD + C<sub>b-w</sub> (baseline)", "baseline + OV<sub>reward</sub>", "baseline + OV<sub>goal</sub>", "baseline + C<sub>b-w</sub>: OV<sub>reward</sub>")
+attributes(xxx)$heading <- NULL
+xxx2 <- xxx#[, c(1,2, 6, 7, 8)]
+xxx2$AIC <- round(xxx2$AIC)
+xxx2$BIC <- round(xxx2$BIC)
+xxx2$Chisq <- round(xxx2$Chisq,2)
+xxx2[,8] <- round(xxx2[,8],3)
+xxx2$logLik <- xxx2$AIC - c(NaN, xxx2$AIC[1:length(xxx2$AIC)-1]) 
+allR2s <- rsquared(list(BWRTmodbase,BWRTmod0, BWRTmod1b, BWRTmod1g))
+xxx2[,1] <- round(allR2s$Conditional,2)
+xxx2 <- xxx2[, c(1:4, 6, 8)]
+colnames(xxx2) <- c("R<sup>2</sub>", "AIC", "BIC", "dAIC", "Chi<sup>2</sub>", "p")
+htmlTable(xxx2)
+
+
+
+```
+
+
+## Liking  
+
+> Liking is related to reward values, not goal values
+
+```{r echo=TRUE}
+a1$LikingOrdinal <- as.factor(a1$tmpAllLrateAllTrials)
+#ordered(a1fMRI$LikingOrdinal, levels=c("1", "2", "3", "4", "5"))
+a1$cMaxV <- scale(a1$MaxBid/10, scale=FALSE, center=TRUE)
+fmm1Lik <- clmm(LikingOrdinal ~ isChooseBestTrial+crelGoalvAvRem +cAvBid +     cavGoalValue +cRT+(isChooseBestTrial+cRT|subj_idx), data= a1[!a1$Choice1==-1,])
+
+tab_model(fmm1Lik, transform= NULL,show.stat = TRUE, string.stat = "z", pred.labels= c("(Intercept: 1|2)","(Intercept: 2|3)", "(Intercept: 3|4)", "(Intercept: 4|5)","Best - Worst Condition", "Value Difference","Overall Reward Value", "Overall Goal Value",  "RT")) 
+
+fmm1Likb <- clmm(LikingOrdinal ~ isChooseBestTrial+cMaxV +cAvBid +     cavGoalValue +cRT+(isChooseBestTrial+cRT|subj_idx), data= a1[!a1$Choice1==-1,])
+
+tab_model(fmm1Likb, transform= NULL,show.stat = TRUE, string.stat = "z", pred.labels= c("(Intercept: 1|2)","(Intercept: 2|3)", "(Intercept: 3|4)", "(Intercept: 4|5)","Best - Worst Condition", "Max Value","Overall Reward Value", "Overall Goal Value",  "RT")) 
+```
+
+
+```{r echo=TRUE}
+## interlude: power analysis for Study 4 (incentivized version) We need 3-ish participants for 80% power. We chose to get 14 to be safe.
+# power <- powerSim(BWRTmod1b,test = fixed("cAvBid:isChooseBestTrial"), nsim = 200)
+# pc1 <- powerCurve(BWRTmod1b,test = fixed("cAvBid:isChooseBestTrial"), nsim = 200, along= "subj_idx")
+# plot(pc1)
+```
+
+
+# LCA simulations:  
+> We simulated data from two LCA models using the behavioral data from Study 1. One took the original ratings as inputs (reward values) and the other one goal congruency coded values (goal values). Only the goal value LCA could produce the observed reversing overall value effect on RT.  
+
+## Goal value LCA
+
+```{r echo=TRUE}
+input_file = '/Users/Romy/Dropbox (Brown)/ShenhavLab/Experiments/bas/Analysis/HDDM/allSubDataTableSIMBASBWflip_01152019.xls' # LCA simulated data
+
+a4= read.xls(input_file)
+
+a4$subj_idx <- as.factor(a4$subj_idx)
+a4$cgoalvAvRemBid <- scale(a4$goalvAvRemBid, center=TRUE, scale = FALSE)
+a4$cAvBid <- scale(a4$AvBid, center=TRUE, scale = FALSE)
+a4$avGoalValue <- a4$AvBid  ## the value of the set relative to the goal
+a4$avGoalValue[a4$isChooseBestTrial==0] <- (a4$AvBid[a4$isChooseBestTrial==0]*-1) +10
+a4$cavGoalValue <- scale(a4$avGoalValue, scale=FALSE, center= TRUE)
+a4$isChooseBestTrial <- as.factor(a4$isChooseBestTrial)
+contrasts(a4$isChooseBestTrial) <- contr.sdif(2)
+
+lSIMRT <- log(a4$SIMRT)
+BWKRTmod0worstSIM <- lm(lSIMRT~ isChooseBestTrial*(cgoalvAvRemBid+cAvBid), data = a4)
+```
+
+**Figure 1D** 
+
+```{r echo=TRUE}
+eff_df <- Effect(c("cAvBid", "isChooseBestTrial"), BWKRTmod0worstSIM,xlevels=list(cAvBid=seq(min(a4$cAvBid), max(a4$cAvBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cAvBid <- IA$cAvBid +5
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pgOV <- ggplot(data=IA, aes(x=cAvBid, y=fit , color=isChooseBestTrial )) + geom_line(size=2)+scale_colour_manual(name="Goal",values=c("#CC0000","#999999")) +theme_bw(12)+ 
+  scale_y_continuous(limits=c(0.8, 1.65), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Overall Value") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"), BWKRTmod0worstSIM,xlevels=list(cgoalvAvRemBid=seq(min(a4$cgoalvAvRemBid), max(a4$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cgoalvAvRemBid <- IA$cgoalvAvRemBid - min(a4$cgoalvAvRemBid)
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pgRV <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line(size=2)+scale_colour_manual(name="Goal",values=c("#CC0000","#999999")) +theme_bw(12)+ 
+  scale_y_continuous(limits=c(0.8, 1.65), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Value Difference") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")
+
+multiplot( pgOV,pgRV, cols=2)
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/HDDM/SIMbw_flip.pdf", width = 8, height = 4)
+multiplot( pgOV,pgRV, cols=2)
+dev.off()
+```
+
+**SI Figures 2-3**
+
+```{r echo=TRUE}
+## goal value model
+BWKRTmod0worstSIM <- lm(lSIMRT~ isChooseBestTrial+(cgoalvAvRemBid+cavGoalValue), data = a4)
+
+
+eff_df <- Effect(c("cavGoalValue", "isChooseBestTrial"), BWKRTmod0worstSIM,xlevels=list(cAvBid=seq(min(a4$cAvBid), max(a4$cAvBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cavGoalValue <- IA$cavGoalValue +5
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pgOV <- ggplot(data=IA, aes(x=cavGoalValue, y=fit , color=isChooseBestTrial )) + geom_line(size=2)+scale_colour_manual(name="Goal",values=c("#CC0000","#999999")) +theme_bw(12)+ 
+  scale_y_continuous(limits=c(0.8, 1.65), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Overall Goal Value") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")
+
+pgOV
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/HDDM/SIMbw_GVRT.pdf", width = 4, height = 4)
+pgOV
+dev.off()
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"), BWKRTmod0worstSIM,xlevels=list(cgoalvAvRemBid=seq(min(a4$cgoalvAvRemBid), max(a4$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cgoalvAvRemBid <- IA$cgoalvAvRemBid - min(a4$cgoalvAvRemBid)
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pgRV <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line(size=2)+scale_colour_manual(name="Goal",values=c("#CC0000","#999999")) +theme_bw(12)+ 
+  scale_y_continuous(limits=c(0.8, 1.65), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Value Difference") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")
+
+eff_df <- Effect(c("isChooseBestTrial"), BWKRTmod0worstSIM)
+Catmain <- as.data.frame(eff_df)
+Catmain$isChooseBestTrial<- revalue(Catmain$isChooseBestTrial, c("0"="worst", "1"="best"))
+pGVmain <- ggplot(data=Catmain, aes(x=isChooseBestTrial, y=fit, color = isChooseBestTrial))+ geom_point(size=8, shape = 18)+scale_y_continuous(limits=c(0.8, 1.65), expand=c(0, 0))+
+  geom_errorbar(aes(max = upper, min = lower), width=0,alpha=0.3) + geom_point()+ theme_bw()+theme(axis.text = element_text(size = 12), strip.text.x= element_text(size=12))+xlab("Choice Condition") +scale_colour_manual(name="Goal",values=c("#CC0000","#999999")) + ylab("log RT")+
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")
+
+multiplot( pgRV,pGVmain, cols=2)
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/HDDM/SIMbw_GV.pdf", width = 8, height = 4)
+multiplot( pgRV,pGVmain, cols=2)
+dev.off()
+
+## plot for GV and ACC
+BWKRTmod0worstSIM <- lm(SIMCHOICE~ isChooseBestTrial*(cgoalvAvRemBid+cavGoalValue), data = a4[!a4$goalvNext==0,])
+
+eff_df <- Effect(c("cavGoalValue", "isChooseBestTrial"), BWKRTmod0worstSIM,xlevels=list(cAvBid=seq(min(a4$cAvBid), max(a4$cAvBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cavGoalValue <- IA$cavGoalValue +5
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+pgCorrgv <- ggplot(data=IA, aes(x=cavGoalValue, y=fit , color=isChooseBestTrial )) + geom_line(size=2)+scale_colour_manual(name="Goal",values=c("#CC0000","#999999")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cavGoalValue, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0, 1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Overall Value") + ylab("P(Goal Chosen)") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom") + ggtitle("Goal Value LCA")
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"), BWKRTmod0worstSIM,xlevels=list(cgoalvAvRemBid=seq(min(a4$cgoalvAvRemBid), max(a4$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cgoalvAvRemBid <- IA$cgoalvAvRemBid - min(a4$cgoalvAvRemBid)
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pgRVACCgv <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line(size=2)+scale_colour_manual(name="Goal",values=c("#CC0000","#999999")) +theme_bw(12)+ 
+  scale_y_continuous(limits=c(0, 1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Value Difference") + ylab("P(Goal Chosen)") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")
+
+```
+
+## Reward value LCA
+
+**SI Figures 1**
+
+```{r echo=TRUE}
+
+input_file = '/Users/Romy/Dropbox (Brown)/ShenhavLab/Experiments/bas/Analysis/HDDM/allSubDataTableSIMBASBWreward_01152019.xls' # LCA simulated data
+
+a4= read.xls(input_file)
+
+a4$subj_idx <- as.factor(a4$subj_idx)
+a4$cgoalvAvRemBid <- scale(a4$goalvAvRemBid, center=TRUE, scale = FALSE)
+a4$cAvBid <- scale(a4$AvBid, center=TRUE, scale = FALSE)
+a4$avGoalValue <- a4$AvBid  ## the value of the set relative to the goal
+a4$avGoalValue[a4$isChooseBestTrial==0] <- (a4$AvBid[a4$isChooseBestTrial==0]*-1) +10
+a4$cavGoalValue <- scale(a4$avGoalValue, scale=FALSE, center= TRUE)
+a4$isChooseBestTrial <- as.factor(a4$isChooseBestTrial)
+contrasts(a4$isChooseBestTrial) <- contr.sdif(2)
+
+lSIMRT <- log(a4$SIMRT)
+BWKRTmod0worstSIM <- lm(lSIMRT~ isChooseBestTrial*(cgoalvAvRemBid+cAvBid), data = a4)
+
+
+eff_df <- Effect(c("cAvBid", "isChooseBestTrial"), BWKRTmod0worstSIM,xlevels=list(cAvBid=seq(min(a4$cAvBid), max(a4$cAvBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cAvBid <- IA$cAvBid +5
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+prewOV <- ggplot(data=IA, aes(x=cAvBid, y=fit , color=isChooseBestTrial )) + geom_line(size=2)+scale_colour_manual(name="Goal",values=c("#CC0000","#999999")) +theme_bw(12)+ 
+  scale_y_continuous(limits=c(0.8, 1.65), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Overall Value") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"), BWKRTmod0worstSIM,xlevels=list(cgoalvAvRemBid=seq(min(a4$cgoalvAvRemBid), max(a4$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cgoalvAvRemBid <- IA$cgoalvAvRemBid - min(a4$cgoalvAvRemBid)
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+prewRV <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line(size=2)+scale_colour_manual(name="Goal",values=c("#CC0000","#999999")) +theme_bw(12)+ 
+  scale_y_continuous(limits=c(0.8, 1.65), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Value Difference") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")
+
+multiplot(prewOV, prewRV, cols=2)
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/HDDM/SIMbw_rew.pdf", width = 8, height = 4)
+multiplot(prewOV, prewRV, cols=2)
+dev.off()
+
+
+BWKRTmod0worstSIM <- lm(SIMCHOICE~ isChooseBestTrial*(cgoalvAvRemBid+cavGoalValue), data = a4[!a4$goalvNext==0,])
+
+eff_df <- Effect(c("cavGoalValue", "isChooseBestTrial"), BWKRTmod0worstSIM,xlevels=list(cAvBid=seq(min(a4$cAvBid), max(a4$cAvBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cavGoalValue <- IA$cavGoalValue +5
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+pgCorrrv <- ggplot(data=IA, aes(x=cavGoalValue, y=fit , color=isChooseBestTrial )) + geom_line(size=2)+scale_colour_manual(name="Goal",values=c("#CC0000","#999999")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cavGoalValue, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0, 1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Overall Value") + ylab("P(Goal Chosen)") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")+ ggtitle("Reward Value LCA")
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"), BWKRTmod0worstSIM,xlevels=list(cgoalvAvRemBid=seq(min(a4$cgoalvAvRemBid), max(a4$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cgoalvAvRemBid <- IA$cgoalvAvRemBid - min(a4$cgoalvAvRemBid)
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pgRVACCrv <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line(size=2)+scale_colour_manual(name="Goal",values=c("#CC0000","#999999")) +theme_bw(12)+ 
+  scale_y_continuous(limits=c(0, 1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Value Difference") + ylab("P(Goal Chosen)") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")
+
+```
+
+> Accuracy of choices as a function of relative and overall goal value for the goal vs reward value LCA
+
+```{r echo=TRUE}
+
+multiplot(pgCorrgv, pgRVACCgv, pgCorrrv, pgRVACCrv, cols=2)
+
+```
+
+
+# Study 2: best vs worst within fMRI  
+
+data prep
+
+```{r echo=TRUE}
+# 1: center covariates
+a1fMRI$cgoalvAvRemBid <- scale(a1fMRI$goalvAvRemBid/10, center=TRUE, scale = FALSE)                  ## unsigned value difference (max/min vs average remaining)
+a1fMRI$cgoalvNext <- scale(a1fMRI$goalvNext/10, center=TRUE, scale = FALSE)
+a1fMRI$cAvBid <- scale(a1fMRI$AvBid/10, center=TRUE, scale = FALSE)
+a1fMRI$cRT <- scale(a1fMRI$logRT, center=TRUE, scale=FALSE)
+#a1fMRI$cChosenvAvRemV <- scale(a1fMRI$ChosenvAvRemV, center= TRUE, scale=FALSE)
+a1fMRI$Liking <- a1fMRI$tmpAllLrateAllTrials
+a1fMRI$avGoalValue <- a1fMRI$AvBid                                                               ## the value of the set relative to the goal
+a1fMRI$avGoalValue[a1fMRI$isChooseBestTrial==0] <- (a1fMRI$AvBid [a1fMRI$isChooseBestTrial==0]*-1) +10
+a1fMRI$cavGoalValue <- scale(a1fMRI$avGoalValue/10, scale=FALSE, center= TRUE)
+a1fMRI$goalChosenV <- a1fMRI$ChosenV                                                              ## the value of the chosen Item relativ to goal
+a1fMRI$goalChosenV[a1fMRI$isChooseBestTrial==0] <- (a1fMRI$ChosenV[a1fMRI$isChooseBestTrial==0]*-1) +10
+a1fMRI$cgoalChosenV <- scale(a1fMRI$goalChosenV/10, scale=FALSE, center= TRUE)
+a1fMRI$cChosenV <- scale(a1fMRI$ChosenV/10, scale=FALSE, center=TRUE)
+a1fMRI$avUnchV <- a1fMRI$SumUnchV/3                                                               ## average of the unchosen values
+a1fMRI$cavUnchV <- scale(a1fMRI$avUnchV/10, scale=FALSE, center=TRUE)
+a1fMRI$avgoalUnchV <- a1fMRI$avUnchV                                                              ## average of unchosen values relative to goal
+a1fMRI$avgoalUnchV[a1fMRI$isChooseBestTrial==0] <- (a1fMRI$avUnchV[a1fMRI$isChooseBestTrial==0]*-1) +10
+a1fMRI$cavgoalUnchV <- scale(a1fMRI$avgoalUnchV/10, scale=FALSE, center=TRUE)
+a1fMRI$relGoalvAvRem <- a1fMRI$goalChosenV - a1fMRI$avgoalUnchV                                       ## goal related chosen vs unchosen (negative Values are suboptimal choices) 
+a1fMRI$crelGoalvAvRem <- scale(a1fMRI$relGoalvAvRem/10, scale=FALSE, center=TRUE)
+a1fMRI$goalVal <- a1fMRI$MaxBid
+a1fMRI$goalVal[a1fMRI$isChooseBestTrial==0] <- a1fMRI$MinBid[a1fMRI$isChooseBestTrial==0]
+a1fMRI$cgoalVal <- scale(a1fMRI$goalVal, scale=FALSE, center=TRUE)                               ## goal Value (best matching value in set relative to goal)
+a1fMRI$rewSpgoalvAvRem <- a1fMRI$goalVal - a1fMRI$avUnchV                                            ## goal v av rem in bid space
+a1fMRI$crewSpgoalvAvRem <- scale(a1fMRI$rewSpgoalvAvRem/10, scale=FALSE, center=TRUE) 
+a1fMRI$Prgoalcons <- a1fMRI$goalVal
+a1fMRI$Prgoalcons[a1fMRI$isChooseBestTrial==0] <- 10 - a1fMRI$MinBid[a1fMRI$isChooseBestTrial==0]        ## this is a terrible variable name, but that's the revalued goal value
+a1fMRI$ChosenvAvRemV <- scale(a1fMRI$ChosenvAvRemV/10, scale=FALSE, center=TRUE)    
+a1fMRI$cLiking <- scale(a1fMRI$Liking/5, scale=FALSE, center=TRUE)
+
+## max and min V in reward space
+a1fMRI$cMaxVR <- scale(a1fMRI$MaxBid/10, scale=FALSE, center=TRUE)
+a1fMRI$cMinVR <- scale(a1fMRI$MinBid/10, scale=FALSE, center=TRUE)
+
+a1fMRI$MaxVG <- a1fMRI$MaxBid
+a1fMRI$MaxVG [a1fMRI$isChooseBestTrial==0] <- 10 - a1fMRI$MaxBid[a1fMRI$isChooseBestTrial==0]
+a1fMRI$MinVG <- a1fMRI$MinBid 
+a1fMRI$MinVG [a1fMRI$isChooseBestTrial==0] <- 10 - a1fMRI$MinBid[a1fMRI$isChooseBestTrial==0]
+
+a1fMRI$cMaxVG <- scale(a1fMRI$MaxVG/10, scale=FALSE, center=TRUE)
+a1fMRI$cMinVG <- scale(a1fMRI$MinVG/10, scale=FALSE, center=TRUE)
+
+# 2: make categorical predictors factors and set contrasts
+a1fMRI$subj_idx <- as.factor(a1fMRI$subj_idx)
+a1fMRI$isChooseBestTrial <- as.factor(a1fMRI$isChooseBestTrial)
+contrasts(a1fMRI$isChooseBestTrial) <- contr.sdif(2)
+
+a1fMRI$block <- rep(1, length(a1fMRI$subj_idx))
+a1fMRI$block[a1fMRI$Trial > 60] <- 2
+a1fMRI$block <- as.factor(a1fMRI$block)
+contrasts(a1fMRI$block) <- contr.sdif(2)
+a1fMRI$CondType <- as.factor(a1fMRI$CondType)
+a1fMRI$CondType <- revalue(a1fMRI$CondType, c("1"="mixed", "2"="low", "3"="medium", "4"="high"))
+
+## add and transform neural ROI data
+
+#colnames(BAROI)
+a1fMRI$binConjunc_PvNxDECxRECxMONxPRI <- scale(BAROI$binConjunc_PvNxDECxRECxMONxPRI,center = TRUE, scale= TRUE)
+
+## with scaling
+a1fMRI$sBARTRA_NAcc <- scale(BAROIsub$BARTRA_NAcc,center = TRUE, scale= TRUE)
+a1fMRI$sBARTRA_vmPFC <- scale(BAROIsub$BARTRA_vmPF,center = TRUE, scale= TRUE)
+
+a1fMRI$sDMN_Str <- scale(SEEDROIS$DMN_Str_4mm,center = TRUE, scale= TRUE)
+a1fMRI$sFCN_Str <- scale(SEEDROIS$FCN_Str_4mm,center = TRUE, scale= TRUE)
+a1fMRI$sLN_Str <- scale(SEEDROIS$LN_Str_4mm,center = TRUE, scale= TRUE)
+
+a1fMRI$sPOS_PCC <- scale(ROI$POS_PCC_p001_k50_isolated__0__31_41,center = TRUE, scale= TRUE)
+
+# BA14 [mOFC] vs. BA24 [pgACC])
+a1fMRI$sHUvC_mOFC <- scale(VMPFCROI$Anat_ProbAtlas_BA14_p50bin_1,center = TRUE, scale= TRUE)
+a1fMRI$sPOS_rACC <- scale(VMPFCROI$Anat_ProbAtlas_BA24_p50bin_1,center = TRUE, scale= TRUE)
+## without scaling
+
+a1fMRI$BARTRA_NAcc <- BAROIsub$BARTRA_NAcc
+a1fMRI$BARTRA_vmPFC <- BAROIsub$BARTRA_vmPF
+
+a1fMRI$POS_PCC <- ROI$POS_PCC_p001_k50_isolated__0__31_41
+# BA14 [mOFC] vs. BA24 [pgACC])
+a1fMRI$HUvC_mOFC <-VMPFCROI$Anat_ProbAtlas_BA14_p50bin_1
+a1fMRI$POS_rACC <- VMPFCROI$Anat_ProbAtlas_BA24_p50bin_1
+
+a1fMRI$DMN_Str <- SEEDROIS$DMN_Str_4mm
+a1fMRI$FCN_Str <- SEEDROIS$FCN_Str_4mm
+a1fMRI$LN_Str <- SEEDROIS$LN_Str_4mm
+
+a1fMRI$OVrROI <- OVrROI$OVr_L_R
+## exclude trials with RT longer than 15s
+as <- a1fMRI
+a1fMRI <- a1fMRI[a1fMRI$rt<15,]
+```
+
+## accuracy  
+
+```{r echo=TRUE}
+S2BWaccmod0 <- glmer(response~ cgoalvAvRemBid*isChooseBestTrial+cAvBid+(isChooseBestTrial|subj_idx), data = a1fMRI[!a1fMRI$goalvNext==0,], 
+                                  family = binomial) 
+
+sv1_max <- svd(getME(S2BWaccmod0, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(S2BWaccmod0, transform= NULL ,show.stat = TRUE, string.stat="z",   dv.labels = c("P(Goal Chosen)"), pred.labels= c("(Intercept)", "Value Difference","Best - Worst Conditon", "Overall Value", "Value Difference:Best - Worst Conditon"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"),S2BWaccmod0, xlevels=list(cgoalvAvRemBid=seq(min(a1fMRI$cgoalvAvRemBid), max(a1fMRI$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+IA$cgoalvAvRemBid <- IA$cgoalvAvRemBid - min(IA$cgoalvAvRemBid)
+
+## with CI instead of se
+pBWaccBWcol <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cgoalvAvRemBid, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous( limits=c(0, 1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 1), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("value difference") + ylab("Pr(goal chosen)") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.justification=c(1,0), legend.position=c(0.95,0.05))
+
+pBWaccBWcol 
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/best_worst_within_main_accuracyBWcolor.pdf", width = 4, height = 4)#, units = 'cm', res = 200, compression = 'lzw'
+pBWaccBWcol 
+dev.off()
+
+
+
+S2BWaccmod0G <- glmer(response~ cgoalvAvRemBid*isChooseBestTrial+cavGoalValue+(isChooseBestTrial|subj_idx), data = a1fMRI[!a1fMRI$goalvNext==0,], 
+                                  family = binomial) 
+
+sv1_max <- svd(getME(S2BWaccmod0G, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(S2BWaccmod0G, transform= NULL ,show.stat = TRUE, string.stat="z",   dv.labels = c("P(Goal Chosen)"), pred.labels= c("(Intercept)", "Value Difference","Best - Worst Conditon", "Overall Goal Value", "Value Difference:Best - Worst Conditon"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+
+```
+
+## RT  
+
+```{r echo=TRUE}
+## reward space RV-OV
+# best only
+S2BWRTmod1bBEST <- lmer(logRT~ cgoalvAvRemBid+cAvBid+(cgoalvAvRemBid+cAvBid|subj_idx), data = a1fMRI[a1fMRI$isChooseBestTrial==1,],
+                                 REML=FALSE)
+
+sv1_max <- svd(getME(S2BWRTmod1bBEST, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+#worst only
+S2BWRTmod1bWORST <- lmer(logRT~ cgoalvAvRemBid+cAvBid+(cgoalvAvRemBid+cAvBid|subj_idx), data = a1fMRI[a1fMRI$isChooseBestTrial==0,],
+                                 REML=FALSE)
+
+sv1_max <- svd(getME(S2BWRTmod1bWORST, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+#p.val= "kr", show.df = T,
+tab_model(S2BWRTmod1bBEST,S2BWRTmod1bWORST,  transform= NULL ,show.stat = TRUE, string.stat="t",   dv.labels = c("log RT Best", "log RT worst"),pred.labels= c("(Intercept)", "Value Difference", "Overall Value"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> standard analysis without interaction with choice goal  
+
+```{r echo=TRUE}
+S2BWRTmod0 <- lmer(logRT~ cgoalvAvRemBid+cAvBid+isChooseBestTrial+(cgoalvAvRemBid+isChooseBestTrial|subj_idx), data = a1fMRI,
+                                 REML=FALSE)
+
+sv1_max <- svd(getME(S2BWRTmod0, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(S2BWRTmod0,p.val= "kr", show.df = T, transform= NULL ,show.stat = TRUE, string.stat="t",   dv.labels = c("log RT"),pred.labels= c("(Intercept)", "Value Difference", "Overall Value", "Best - Worst Condition"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> adding interaction of choice goal and overall value
+
+```{r echo=TRUE}
+S2BWRTmod1b <- lmer(logRT~ cgoalvAvRemBid+cAvBid*isChooseBestTrial+(cgoalvAvRemBid+isChooseBestTrial|subj_idx), data = a1fMRI,
+                                 REML=FALSE)
+
+sv1_max <- svd(getME(S2BWRTmod1b, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(S2BWRTmod1b,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Value Difference", "Overall Value", "Best - Worst Condition", "Overall Value: Best - Worst"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> nested model to get by condition estimates while controlling for main effect  
+
+```{r echo=TRUE}
+S2BWRTmod1bn <- lmer(logRT~ cgoalvAvRemBid+isChooseBestTrial/(cAvBid)+(cgoalvAvRemBid+isChooseBestTrial|subj_idx), data = a1fMRI,
+                                  REML=FALSE)
+
+sv1_max <- svd(getME(S2BWRTmod1bn, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1) 
+
+tab_model(S2BWRTmod1bn,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Best - Worst Condition", "Value Difference", "Worst: Overall Value", "Best: Overall Value"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+
+**Figure 1 C overlay part 2**  
+
+```{r echo=TRUE}
+eff_df <- Effect(c("cAvBid", "isChooseBestTrial"), S2BWRTmod1b)
+IA <- as.data.frame(eff_df)
+IA$cAvBid <- (IA$cAvBid - min(IA$cAvBid))*10
+
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pASVBW <- ggplot(data=IA, aes(x=cAvBid, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cAvBid, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0.8, 2.1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Overal value") + ylab(" ") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+ theme(legend.justification=c(1,1), legend.position=c(0.95,0.25) )
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"), S2BWRTmod1b, xlevels=list(cgoalvAvRemBid=seq(min(a1fMRI$cgoalvAvRemBid), max(a1fMRI$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cgoalvAvRemBid <- (IA$cgoalvAvRemBid - min(IA$cgoalvAvRemBid))*10
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+
+## with CI instead of se
+pVDBW <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cgoalvAvRemBid, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0.8, 2.1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Relative Value") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+ theme(legend.position="none" )
+
+multiplot( pVDBW,pASVBW, cols=2)
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/best_worst_within_allRS.pdf", width = 8, height = 4)#, units = 'cm', res = 200, compression = 'lzw'
+multiplot( pVDBW,pASVBW, cols=2)
+dev.off()
+```
+
+> goal value instead of reward value  
+
+```{r echo=TRUE}
+
+S2BWRTmod1g <- lmer(logRT~ cgoalvAvRemBid+cavGoalValue+isChooseBestTrial+(cgoalvAvRemBid+isChooseBestTrial|subj_idx), data = a1fMRI,
+                                 REML=FALSE)
+
+sv1_max <- svd(getME(S2BWRTmod1g, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(S2BWRTmod1g,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Value Difference", "Overall Goal Value", "Best - Worst Condition"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+eff_df <- Effect(c("cavGoalValue", "isChooseBestTrial"), S2BWRTmod1g)
+IA <- as.data.frame(eff_df)
+IA$cavGoalValue <-  (IA$cavGoalValue - min(IA$cavGoalValue))*10
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pASVBW <- ggplot(data=IA, aes(x=cavGoalValue, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cavGoalValue, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0.8, 2.1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Overall value") + ylab(" ") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.justification=c(1,1), legend.position=c(0.95,0.25) )
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"), S2BWRTmod1g, xlevels=list(cgoalvAvRemBid=seq(min(a1fMRI$cgoalvAvRemBid), max(a1fMRI$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cgoalvAvRemBid <- (IA$cgoalvAvRemBid - min(IA$cgoalvAvRemBid))*10
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pVDBW <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cgoalvAvRemBid, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0.8, 2.1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Relative Value") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="none")
+
+multiplot(pVDBW, pASVBW, cols=2)
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/best_worst_within_allGS.pdf", width = 8, height = 4)#, units = 'cm', res = 200, compression = 'lzw'
+multiplot(pVDBW, pASVBW, cols=2)
+dev.off()
+```
+
+
+> testing for residual OV effects
+
+```{r echo=TRUE}
+S2BWRTmod1allin <- lmer(logRT~ cgoalvAvRemBid+cavGoalValue+ cAvBid+isChooseBestTrial+((cgoalvAvRemBid)+isChooseBestTrial|subj_idx), data = a1fMRI,
+                                     REML=FALSE)
+
+sv1_max <- svd(getME(S2BWRTmod1allin, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(S2BWRTmod1allin,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Value Difference", "Overall Goal Value", "Overall Reward Value", "Best - Worst Condition"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> model comparison
+
+**Table 2 part 2**  
+
+```{r echo=TRUE}
+S2BWRTmodbase <- lmer(logRT~ cgoalvAvRemBid+isChooseBestTrial+(cgoalvAvRemBid+isChooseBestTrial|subj_idx), data = a1fMRI,
+                                     REML=FALSE)
+
+sv1_max <- svd(getME(S2BWRTmodbase, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(S2BWRTmodbase,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Value Difference", "Best - Worst Condition"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+
+# model comparisons
+xxx <- anova(S2BWRTmod0, S2BWRTmod1b, S2BWRTmod1g, S2BWRTmodbase)
+row.names(xxx) <- c("VD + C<sub>b-w</sub> (baseline)", "baseline + OV<sub>reward</sub>", "baseline + OV<sub>goal</sub>", "baseline + C<sub>b-w</sub>: OV<sub>reward</sub>")
+attributes(xxx)$heading <- NULL
+xxx2 <- xxx#[, c(1,2, 6, 7, 8)]
+xxx2$AIC <- round(xxx2$AIC)
+xxx2$BIC <- round(xxx2$BIC)
+xxx2$Chisq <- round(xxx2$Chisq,2)
+xxx2[,8] <- round(xxx2[,8],3)
+xxx2$logLik <- xxx2$AIC - c(NaN, xxx2$AIC[1:length(xxx2$AIC)-1]) 
+allR2s <- rsquared(list(S2BWRTmodbase,S2BWRTmod0, S2BWRTmod1b, S2BWRTmod1g))
+xxx2[,1] <- round(allR2s$Conditional,2)
+xxx2 <- xxx2[, c(1:4, 6, 8)]
+colnames(xxx2) <- c("R<sup>2</sub>", "AIC", "BIC", "dAIC", "Chi<sup>2</sub>", "p")
+htmlTable(xxx2)
+```
+
+**Table 1:**  
+
+```{r echo=TRUE}
+# top
+tab_model(BWRTmod1b,S2BWRTmod1b,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("Study 1", "Study 2"), pred.labels= c("(Intercept)", "Value Difference", "Overall Value", "Best - Worst Condition", "Overall Value: Best - Worst"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+# bottom
+tab_model(BWRTmod1allin, S2BWRTmod1allin,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("Study 1", "Study 2"), pred.labels= c("(Intercept)", "Value Difference", "Overall Goal Value", "Overall Reward Value", "Best - Worst Condition"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+``` 
+
+## Liking  
+
+As in  Study 2, Liking is explained by reward value, not goal value
+
+```{r echo=TRUE}
+a1fMRI$LikingOrdinal <- as.factor(a1fMRI$Liking)
+#ordered(a1fMRI$LikingOrdinal, levels=c("1", "2", "3", "4", "5"))
+a1fMRI$cMaxV <- scale(a1fMRI$MaxBid/10, scale=FALSE, center=TRUE)
+fmm1Lik <- clmm(LikingOrdinal ~ isChooseBestTrial+crelGoalvAvRem +cAvBid +     cavGoalValue +cRT+(isChooseBestTrial+cRT|subj_idx), data= a1fMRI[!a1fMRI$Choice1==-1,])
+
+tab_model(fmm1Lik, transform= NULL,show.stat = TRUE, string.stat = "z", pred.labels= c("(Intercept: 1|2)","(Intercept: 2|3)", "(Intercept: 3|4)", "(Intercept: 4|5)","Best - Worst Condition", "Value Difference","Overall Reward Value", "Overall Goal Value",  "RT")) 
+
+fmm1Likb <- clmm(LikingOrdinal ~ isChooseBestTrial+cMaxV +cAvBid +     cavGoalValue +cRT+(isChooseBestTrial+cRT|subj_idx), data= a1fMRI[!a1fMRI$Choice1==-1,])
+
+tab_model(fmm1Likb, transform= NULL,show.stat = TRUE, string.stat = "z", pred.labels= c("(Intercept: 1|2)","(Intercept: 2|3)", "(Intercept: 3|4)", "(Intercept: 4|5)","Best - Worst Condition", "Max Value","Overall Reward Value", "Overall Goal Value",  "RT")) 
+
+```
+
+
+## fMRI analyses
+
+### 1) Bartra ROI
+
+#### make covariance table for predictors:
+
+> Some basic checks: Predictors are uncorrelated
+
+**Figure S4**  
+
+```{r echo=TRUE}
+library(corrplot)
+covMatPred <- cor(cbind(a1fMRI$cAvBid, a1fMRI$ChosenvAvRemV, a1fMRI$cavGoalValue, a1fMRI$crelGoalvAvRem), method = "spearman")
+
+covMatPlot <- corrplot(covMatPred, type = "upper", order = "original", diag = FALSE,addCoef.col=TRUE,
+         tl.col = "black", tl.srt = 45)
+```
+
+
+
+```{r echo=TRUE}
+pOVGOVRHist <- ggplot(data=a1fMRI, aes(x=avGoalValue, y= AvBid))+ geom_point(shape="O", color="#C0C0C0")+theme_bw(12)+ 
+  xlab("Overall Goal Value") + ylab("Overall Reward Value") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")
+
+ggMarginal(pOVGOVRHist, type = "histogram", fill="#C0C0C0", xparams = list(size=0.1), yparams = list(size=0.1))
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/PredictorScatterOV.pdf", width = 4, height = 4)#, units = 'cm', res = 200, compression = 'lzw'
+ggMarginal(pOVGOVRHist, type = "histogram", fill="#C0C0C0", xparams = list(size=0.1), yparams = list(size=0.1))
+dev.off()
+```
+
+
+```{r echo=TRUE}
+
+pRVGRVRHist <- ggplot(data=a1fMRI, aes(x=relGoalvAvRem, y= ChosenvAvRemV))+ geom_point(shape="O", color="#C0C0C0")+theme_bw(12)+ 
+  xlab("Chosen vs Unchosen Goal Value") + ylab("Chosen vs Unchosen Reward Value") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")
+
+ggMarginal(pRVGRVRHist, type = "histogram", fill="#C0C0C0", xparams = list(size=0.1), yparams = list(size=0.1))
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/PredictorScatterRV.pdf", width = 4, height = 4)#, units = 'cm', res = 200, compression = 'lzw'
+ggMarginal(pRVGRVRHist, type = "histogram", fill="#C0C0C0", xparams = list(size=0.1), yparams = list(size=0.1))
+dev.off()
+```
+
+#### Testing whether reward or goal values (or both) explain value network (BOLD) activity
+
+> Baseline model 
+
+```{r echo=TRUE}
+# baseline model
+BWBACallInModctestbase <- lmer(binConjunc_PvNxDECxRECxMONxPRI~ isChooseBestTrial+cRT+(isChooseBestTrial+cRT|subj_idx), data = a1fMRI,
+                                           REML=FALSE)
+
+sv1_max <- svd(getME(BWBACallInModctestbase, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+tab_model(BWBACallInModctestbase,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("BOLD Activity Value Network"), pred.labels= c("(Intercept)", "Best - Worst Condition" , "RT"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> Reward Value model
+
+```{r echo=TRUE}
+# Reward Value model:
+BWBACallInModctest0 <- lmer(binConjunc_PvNxDECxRECxMONxPRI~ isChooseBestTrial+cAvBid+ ChosenvAvRemV +cRT+(isChooseBestTrial+cRT|subj_idx), data = a1fMRI,
+                                      REML=FALSE)
+
+sv1_max <- svd(getME(BWBACallInModctest0, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+tab_model(BWBACallInModctest0,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("BOLD Activity Value Network"), pred.labels= c("(Intercept)", "Best - Worst Condition" , "Overall Reward Value", "Relative Reward Value", "RT"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> Goal Value Model
+
+```{r echo=TRUE}
+# Goal value model
+BWBACallInModctest2 <- lmer(binConjunc_PvNxDECxRECxMONxPRI~ isChooseBestTrial+cavGoalValue+ crelGoalvAvRem +cRT+(isChooseBestTrial+cRT|subj_idx), data = a1fMRI,
+                                           REML=FALSE)
+
+sv1_max <- svd(getME(BWBACallInModctest2, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+tab_model(BWBACallInModctest2,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("BOLD Activity Value Network"), pred.labels= c("(Intercept)", "Best - Worst Condition" , "Overall Goal Value", "Relative Goal Value", "RT"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> Test for residual Overall Reward Value effects
+
+```{r echo=TRUE}
+# goal values plus OVr
+BWBACallInModctestOVg <- lmer(binConjunc_PvNxDECxRECxMONxPRI~ isChooseBestTrial+cAvBid+cavGoalValue+ crelGoalvAvRem+cRT+(isChooseBestTrial+cRT|subj_idx), data = a1fMRI,REML=FALSE)
+
+sv1_max <- svd(getME(BWBACallInModctestOVg, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+tab_model(BWBACallInModctestOVg,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("BOLD Activity Value Network"), pred.labels= c("(Intercept)", "Best - Worst Condition" ,"Overall Reward Value", "Overall Goal Value", "Relative Goal Value", "RT"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+```
+
+> Full model with all predictors  
+
+**Table 4**  
+
+
+```{r echo=TRUE}
+# full model w all predictors
+BWBACallInModc <- lmer(binConjunc_PvNxDECxRECxMONxPRI~ isChooseBestTrial+cAvBid+ ChosenvAvRemV +cavGoalValue+ crelGoalvAvRem+cRT+(isChooseBestTrial+cRT|subj_idx), data = a1fMRI,
+                                      REML=FALSE)
+
+sv1_max <- svd(getME(BWBACallInModc, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+tab_model(BWBACallInModc,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("BOLD Activity Value Network"), pred.labels= c("(Intercept)", "Best - Worst Condition" ,"Overall Reward Value", "Relative Reward Value", "Overall Goal Value", "Relative Goal Value", "RT"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> Model Comparison
+
+The model with Relative and Overall Goal Value and Overall Reward Value performs best.  
+
+**Table 3**  
+
+```{r echo=TRUE}
+xxx <- anova(BWBACallInModctest0, BWBACallInModctestbase,BWBACallInModctestOVg,BWBACallInModctest2, BWBACallInModc)
+row.names(xxx) <- c("C<sub>b-w</sub> + RT (baseline)", "baseline + RV<sub>reward</sub> + OV<sub>reward</sub>", "baseline+ RV<sub>goal</sub> + OV<sub>goal</sub>", "baseline+ RV<sub>goal</sub> + OV<sub>goal</sub> + OV<sub>reward</sub>", "baseline+ RV<sub>goal</sub> + OV<sub>goal</sub> +RV<sub>reward</sub> + OV<sub>reward</sub>")
+attributes(xxx)$heading <- NULL
+xxx2 <- xxx#[, c(1,2, 6, 7, 8)]
+xxx2$AIC <- round(xxx2$AIC)
+xxx2$BIC <- round(xxx2$BIC)
+xxx2$Chisq <- round(xxx2$Chisq,2)
+xxx2[,8] <- round(xxx2[,8],3)
+xxx2$logLik <- xxx2$AIC - c(NaN, xxx2$AIC[1:length(xxx2$AIC)-1]) 
+allR2s <- rsquared(list(BWBACallInModctestbase,BWBACallInModctest0,BWBACallInModctest2, BWBACallInModctestOVg, BWBACallInModc))
+xxx2[,1] <- round(allR2s$Conditional,3)
+xxx2 <- xxx2[, c(1:4, 6, 8)]
+colnames(xxx2) <- c("R<sup>2</sup>", "AIC", "BIC", "dAIC", "Chi<sup>2</sup>", "p")
+htmlTable(xxx2)
+```
+
+
+**Figure 2**  
+
+```{r echo=TRUE}
+# refit relevant model with lmerTest attached to get the p-values... 
+
+library(lmerTest)
+BWBACallInModc <- lmer(binConjunc_PvNxDECxRECxMONxPRI~ isChooseBestTrial+cAvBid+ ChosenvAvRemV +cavGoalValue+ crelGoalvAvRem+cRT+(isChooseBestTrial+cRT|subj_idx), data = a1fMRI,
+                                      REML=FALSE)
+
+TEST <- as.data.frame(coef(summary(BWBACallInModc)))
+TEST$effects <- rownames(TEST)
+TEST$se <- TEST[,2]
+TEST$effects<- revalue(TEST$effects, c("(Intercept)"="Intercept", "isChooseBestTrial2-1"= "Task goal",  "cAvBid"="OV[reward]", "ChosenvAvRemV"="RV[reward]",  "cavGoalValue"= "OV[goal]", "crelGoalvAvRem"= "RV[goal]"))
+TEST$effects<- ordered(TEST$effects, levels=c("Intercept", "Task goal","RV[reward]",   "OV[reward]", "RV[goal]", "OV[goal]", "cRT"))
+TEST <- TEST[c(3:6), ]
+TEST$effects <- factor(TEST$effects) 
+TEST$isSig <- rep("*", length(TEST$Estimate))
+TEST$isSig[TEST[,5]>0.05] <- NA_real_ 
+TEST$isSig2 <- TEST$isSig
+TEST$isSig2[TEST[,5]<0.01]<- "**" 
+
+EFFPLOT<- ggplot(data=TEST, aes(x=effects, y=Estimate, fill=effects, group=effects, color=effects, shape=effects)) + geom_point(size=5,position=position_dodge(0.6))+theme_bw(12)+ scale_color_manual(values=c("#70AD47", "#70AD47","#313A90",  "#313A90"))+
+geom_errorbar(aes(max = Estimate + se, min = Estimate -se), position=position_dodge(0.6),width=0.1)+scale_shape_manual(values = c(19,15,  19, 15))+  
+  xlab("") + ylab("Regression Coefficient") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position = "none")+
+  geom_hline(aes(yintercept=0), size=0.2,linetype=2, color="black")+
+  geom_text(aes(label=isSig2, y=0.35),position=position_dodge(0.6), size=6,show.legend = F) 
+
+EFFPLOT
+
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/BARTRAROIEFFECTS_chosen_vs_unchosen.pdf", width = 5, height = 3)
+EFFPLOT
+dev.off()
+detach("package:lmerTest", unload = TRUE) # detaching it again for tables to work.
+
+```
+
+
+### 2) Follow up analyses
+
+
+#### vmPFC and ventral Striatum separately 
+
+
+```{r echo=TRUE}
+BWvMPFCCallInMod <- lmer(BARTRA_vmPFC~ isChooseBestTrial+cAvBid+ ChosenvAvRemV +cavGoalValue+ crelGoalvAvRem+cRT+(isChooseBestTrial+cRT|subj_idx), data = a1fMRI,
+                                        REML=FALSE)
+
+sv1_max <- svd(getME(BWvMPFCCallInMod, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+```
+
+
+```{r echo=TRUE}
+library(lmerTest)
+BWvMPFCCallInModplot <- lmer(BARTRA_vmPFC~ isChooseBestTrial+cAvBid+ ChosenvAvRemV +cavGoalValue+ crelGoalvAvRem+cRT+(isChooseBestTrial+cRT|subj_idx), data = a1fMRI,
+                                        REML=FALSE)
+
+TEST <- as.data.frame(coef(summary(BWvMPFCCallInModplot)))
+TEST$effects <- rownames(TEST)
+TEST$se <- TEST[,2]
+TEST$effects<- revalue(TEST$effects, c("(Intercept)"="Intercept", "isChooseBestTrial2-1"= "Task goal",  "cAvBid"="OVr", "ChosenvAvRemV"="RVr",  "cavGoalValue"= "OVg", "crelGoalvAvRem"= "RVg"))
+TEST$effects<- ordered(TEST$effects, levels=c("Intercept", "Task goal","RVr",  "RVg", "OVr",  "OVg", "cRT"))
+TEST <- TEST[c(3:6), ]
+TEST$effects <- factor(TEST$effects) 
+
+TESTvmPFC <- TEST
+
+detach("package:lmerTest", unload = TRUE)
+
+``` 
+
+**Table S3** 
+
+```{r echo=TRUE}
+BWStrCallInMod <- lmer(BARTRA_NAcc~ isChooseBestTrial+cAvBid+ ChosenvAvRemV +cavGoalValue+ crelGoalvAvRem+cRT+(isChooseBestTrial+cRT|subj_idx), data = a1fMRI,
+                                      REML=FALSE)
+
+sv1_max <- svd(getME(BWStrCallInMod, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+tab_model(BWvMPFCCallInMod, BWStrCallInMod,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("BOLD Activity vmPFC", "BOLD Activity vStr"), pred.labels= c("(Intercept)", "Best - Worst Condition" ,"Overall Reward Value", "Relative Reward Value", "Overall Goal Value", "Relative Goal Value", "RT"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+
+library(lmerTest)
+BWStrCallInModplot <- lmer(BARTRA_NAcc~ isChooseBestTrial+cAvBid+ ChosenvAvRemV +cavGoalValue+ crelGoalvAvRem+cRT+(isChooseBestTrial+cRT|subj_idx), data = a1fMRI,
+                                      REML=FALSE)
+
+TEST <- as.data.frame(coef(summary(BWStrCallInModplot)))
+TEST$effects <- rownames(TEST)
+TEST$se <- TEST[,2]
+TEST$effects<- revalue(TEST$effects, c("(Intercept)"="Intercept", "isChooseBestTrial2-1"= "Task goal",  "cAvBid"="OVr", "ChosenvAvRemV"="RVr",  "cavGoalValue"= "OVg", "crelGoalvAvRem"= "RVg"))
+TEST$effects<- ordered(TEST$effects, levels=c("Intercept", "Task goal","RVr",  "RVg", "OVr",  "OVg", "cRT"))
+TEST <- TEST[c(3:6), ]
+TEST$effects <- factor(TEST$effects) # get rid of levels I don't need
+#TEST$effects<- ordered(TEST$effects, levels=c("Intercept", "Task goal","RVr",  "RVg", "OVr",  "OVg", "cRT"))
+
+TEST_vStr <- TEST
+```
+
+**Figure S5**  
+
+```{r echo=TRUE}
+TESTvmPFC$Region <- rep("vmPFC", length(TESTvmPFC$Estimate))
+TEST_vStr$Region <- rep("vStr", length(TEST_vStr$Estimate))
+
+TEST2 <- rbind(TESTvmPFC, TEST_vStr)
+TEST2$effects<- ordered(TEST2$effects, levels=c("Intercept", "Task goal","RVr",   "OVr", "RVg", "OVg", "cRT"))
+TEST2$isSig <- rep("*", length(TEST2$Estimate))
+#TEST2$isSig[TEST2$effects=="RVg"] <- 0.6
+#TEST2$isSig[TEST2$effects=="OVg"] <- 0.5
+TEST2$Loc <- rep(0.55, length(TEST2$Estimate))
+TEST2$Loc[TEST2$effects=="RVg"] <- 0.6
+TEST2$Loc[TEST2$effects=="OVg"] <- 0.5
+TEST2$isSig[TEST2[,5]>0.05] <- NA_real_ 
+TEST2$isSig2 <- TEST2$isSig
+TEST2$isSig2[TEST2[,5]<0.01]<- "**" 
+#,position=position_dodge(0.6) position=position_dodge(0.6),geom_point(aes(x=Region, y=isSig), shape=8)+
+EFFPLOTIA <- ggplot(data=TEST2, aes(x=Region, y=Estimate, fill=effects, group=effects, color=effects, shape=effects)) + geom_point(size=7,position=position_dodge(0.6))+theme_bw(14)+ scale_color_manual(values=c("#70AD47","#70AD47","#313A90","#313A90","#4a58db",  "#70AD47", "#88d356"))+#facet_wrap(~ssConfidence, nrow=1)+#geom_ribbon(data=IA, aes(x=block.c, max = upper, min = lower,alpha=0.1, fill=sDirection),show.legend =FALSE)
+  geom_errorbar(aes(max = Estimate + se, min = Estimate -se), position=position_dodge(0.6),width=0.2)+scale_shape_manual(values = c( 16, 15, 16,15))+ #scale_fill_brewer() + 
+  xlab("") + ylab("Regression Coefficient") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + #theme(legend.position="east outside")+
+  geom_hline(aes(yintercept=0), size=0.2,linetype=2, color="black")+ #geom_line(data=TEST2, aes(x=Region, y=0), size=0.2,linetype=2, color="black") +
+  #theme(axis.text.x = element_text(angle = 60, hjust = 1))+
+  geom_text(aes(label=isSig2, y=0.5),position=position_dodge(0.6), size=10,show.legend = F) 
+# +  geom_point(aes(x=Region, y=isSig2), shape=8, position= 0.3 )
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/BARTRAROIEFFECTS_chosen_vs_unchosen_all_Regions_Strvs_vmPFC.pdf", width = 6, height = 4)#, units = 'cm', res = 200, compression = 'lzw'
+EFFPLOTIA
+dev.off()
+detach("package:lmerTest", unload = TRUE)
+EFFPLOTIA
+
+```
+
+
+#### Interaction model
+
+> no significant interaction with region when comparing effects in vmPFC and vStr
+
+```{r echo=TRUE}
+a2R <- rbind(a1fMRI, a1fMRI)
+
+a2R$Region <- rep(c("vmPFC", "VStr"), each=length(a1fMRI$subj_idx))
+a2R$Region <- as.factor(a2R$Region)
+a2R$Region <- ordered(a2R$Region, levels= c("vmPFC", "VStr"))
+contrasts(a2R$Region) <- contr.poly(2)#contr.sdif(2)
+a2R$BOLD <- a2R$BARTRA_vmPFC
+a2R$BOLD[a2R$Region=="VStr"] <- a2R$BARTRA_NAcc[a2R$Region=="VStr"] 
+contrasts(a2R$isChooseBestTrial) <- contr.sdif(2)
+
+library(lmerTest)
+BARTRASubMod0 <- lmer(BOLD~ (isChooseBestTrial+cAvBid+ ChosenvAvRemV +cavGoalValue+ crelGoalvAvRem)*Region+cRT+(isChooseBestTrial+cRT+Region|subj_idx), data = a2R,
+                                     REML=FALSE)
+
+sv1_max <- svd(getME(BARTRASubMod0, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+
+xxx <- anova(BARTRASubMod0)
+row.names(xxx) <- c("Best-Worst Condition", "OV<sub>reward</sub>", "RV<sub>reward</sub>","OV<sub>goal</sub>","RV<sub>goal</sub>", "Region", "RT","C<sub>b-w</sub>: Region", "OV<sub>reward</sub>:Region", "RV<sub>reward</sub>:Region","OV<sub>goal</sub>:Region","RV<sub>goal</sub>:Region")
+attributes(xxx)$heading <- NULL
+xxx[, c(1:5)] <- round(xxx[, c(1:5)],2)
+xxx[, 6] <- round(xxx[, 6],3)
+htmlTable(xxx)
+detach("package:lmerTest", unload = TRUE)
+```
+
+
+
+
+```{r echo=TRUE}
+BARTRASubMod0t <- lmer(BOLD~ Region/(isChooseBestTrial+cAvBid+ cavGoalValue+ChosenvAvRemV + crelGoalvAvRem)+cRT+(isChooseBestTrial+cRT+Region|subj_idx), data = a2R,
+                                      REML=FALSE)
+
+sv1_max <- svd(getME(BARTRASubMod0t, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+#p.val= "kr", show.df = T ,
+tab_model(BARTRASubMod0t,show.stat = TRUE, string.stat="t", dv.labels = c("BOLD"), pred.labels= c("(Intercept)", "Region (linear)", "RT", "vmPFC: Best - Worst Condition","vStr: Best - Worst Condition" ,"vmPFC: Overall Reward Value", "vStr: Overall Reward Value","vmPFC:Overall Goal Value","vStr: Overall Goal Value","vmPFC: Relative Reward Value", "vStr: Relative Reward Value",  "vmPFC: Relative Goal Value",  "vStr: Relative Goal Value"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+```
+
+***  
+
+#### Gradient analysis Striatum
+
+**Table S5**
+
+```{r echo=TRUE}
+
+
+### Data Prep ###
+a3 <- rbind(a1fMRI, a1fMRI, a1fMRI)
+
+a3$Region <- rep(c("DC", "VSs", "VSi"), each=length(a1fMRI$subj_idx))
+a3$Region <- as.factor(a3$Region)
+a3$Region <- ordered(a3$Region, levels= c( "DC", "VSs", "VSi"))
+contrasts(a3$Region) <- contr.poly(3)
+a3$BOLD <- a3$FCN_Str
+a3$BOLD[a3$Region=="VSs"] <- a3$DMN_Str[a3$Region=="VSs"] 
+a3$BOLD[a3$Region=="VSi"] <- a3$LN_Str[a3$Region=="VSi"] 
+contrasts(a3$isChooseBestTrial) <- contr.sdif(2)
+
+a9 <- rbind(a3, a3)
+
+a9$CATValue <- rep(c("OVr","RVg"), each=length(a3$subj_idx))
+a9$CATValue <- as.factor(a9$CATValue)
+a9$CATValue <- ordered(a9$CATValue, levels= c( "OVr", "RVg"))
+contrasts(a9$CATValue ) <- contr.sdif(2)
+a9$ContValue  <- a9$cAvBid 
+a9$ContValue[ a9$CATValue =="RVg"] <- a9$crelGoalvAvRem[ a9$CATValue =="RVg"]
+contrasts(a9$isChooseBestTrial) <- contr.sdif(2)
+contrasts(a9$Region) <- contr.poly(3) # to test for linear and quadratic effects
+
+###################### THIS IS THE GRADIENT ANALYSIS!!!! ################################
+
+library(lmerTest)
+Gradient3by3Mod0 <- lmer(BOLD~ Region*CATValue:ContValue+cRT+(cRT|subj_idx), data = a9,
+                                        REML=FALSE)
+
+yyy <- summary(Gradient3by3Mod0)
+yyy2 <- yyy$coefficients
+
+row.names(yyy2) <-  c("(Intercept)", "Region (linear)","Region (quadratic)","RT", "Overall Reward Value","Relative Goal Value" ,"Region (linear): Overall Reward Value", "Region (quadratic): Overall Reward Value","Region (linear): Relative Goal Value",  "Region (quadratic): Relative Goal Value")
+yyy2 <- yyy2[,c(1,2, 4, 3,5)]
+colnames(yyy2) <- c("Estimates", "SE","t", "df",  "p")
+yyy2[,c(1:4)] <- round(yyy2[,c(1:4)],2)
+yyy2[,c(5)] <- round(yyy2[,c(5)],3)
+htmlTable(yyy2)
+
+xxx <- anova(Gradient3by3Mod0)
+row.names(xxx) <- c("Region", "RT", "Value Type","Region: Value Type")
+attributes(xxx)$heading <- NULL
+xxx[, c(1:5)] <- round(xxx[, c(1:5)],2)
+xxx[, 6] <- round(xxx[, 6],3)
+htmlTable(xxx)
+detach("package:lmerTest", unload = TRUE)
+
+``` 
+
+##### Estimates by Regions separately
+
+Dorsal Caudate
+
+```{r echo=TRUE}
+
+library(lmerTest)
+BWFCN_StrCallInMod <- lmer(FCN_Str~ isChooseBestTrial+cAvBid+ crelGoalvAvRem+cRT+(isChooseBestTrial|subj_idx), data = a1fMRI,
+                                          REML=FALSE)
+
+sv1_max <- svd(getME(BWFCN_StrCallInMod, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+TEST <- as.data.frame(coef(summary(BWFCN_StrCallInMod)))
+TEST$effects <- rownames(TEST)
+TEST$se <- TEST[,2]
+TEST$effects<- revalue(TEST$effects, c("(Intercept)"="Intercept", "isChooseBestTrial2-1"= "Task goal",  "cAvBid"="OVr", "crelGoalvAvRem"= "RVg"))
+TEST$effects<-  ordered(TEST$effects, levels=c("Intercept", "Task goal", "RVg", "OVr",  "cRT"))
+TEST <- TEST[c(3:4), ]
+TEST$effects <- factor(TEST$effects) 
+TESTDC <- TEST
+
+```
+
+Ventral Striatum (superior)
+
+```{r echo=TRUE}
+BWDMN_StrCallInMod <- lmer(DMN_Str~ isChooseBestTrial+cAvBid+crelGoalvAvRem+cRT+(isChooseBestTrial|subj_idx), data = a1fMRI,
+                                          REML=FALSE)
+
+sv1_max <- svd(getME(BWDMN_StrCallInMod, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+
+TEST <- as.data.frame(coef(summary(BWDMN_StrCallInMod)))
+TEST$effects <- rownames(TEST)
+TEST$se <- TEST[,2]
+TEST$effects<- revalue(TEST$effects, c("(Intercept)"="Intercept", "isChooseBestTrial2-1"= "Task goal",  "cAvBid"="OVr", "crelGoalvAvRem"= "RVg"))
+TEST$effects<-  ordered(TEST$effects, levels=c("Intercept", "Task goal", "RVg", "OVr",  "cRT"))
+TEST <- TEST[c(3:4), ]
+TEST$effects <- factor(TEST$effects) 
+TESTVSS <- TEST
+
+```
+
+ventral Striatum (inferior)
+
+```{r echo=TRUE}
+
+BWLN_StrCallInMod <- lmer(LN_Str~ isChooseBestTrial+cAvBid +crelGoalvAvRem+cRT+(isChooseBestTrial|subj_idx), data = a1fMRI, 
+                                         REML=FALSE)
+
+sv1_max <- svd(getME(BWLN_StrCallInMod, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+
+TEST <- as.data.frame(coef(summary(BWLN_StrCallInMod)))
+TEST$effects <- rownames(TEST)
+TEST$se <- TEST[,2]
+TEST$effects<- revalue(TEST$effects, c("(Intercept)"="Intercept", "isChooseBestTrial2-1"= "Task goal",  "cAvBid"="OVr", "crelGoalvAvRem"= "RVg"))
+TEST$effects<-  ordered(TEST$effects, levels=c("Intercept", "Task goal", "RVg", "OVr",  "cRT"))
+TEST <- TEST[c(3:4), ]
+TEST$effects <- factor(TEST$effects) 
+
+
+TESTVSI <- TEST
+
+detach("package:lmerTest", unload = TRUE)
+
+```
+
+**FIGURE 3**
+
+```{r echo=TRUE}
+
+## integrate all effects into 1 figure
+#"DC", "VSs", "VSi"
+TESTDC$Region <- rep("Dorsal\n Caudate", length(TESTDC$Estimate))
+TESTVSS$Region <- rep("Ventral\n Striatum\n (superior)", length(TESTVSS$Estimate))
+TESTVSI$Region <- rep("Ventral\n Striatum\n (inferior)", length(TESTVSI$Estimate))
+
+TEST2 <- rbind(TESTDC, TESTVSS, TESTVSI)
+TEST2$Region<- ordered(TEST2$Region, levels=c("Dorsal\n Caudate", "Ventral\n Striatum\n (superior)", "Ventral\n Striatum\n (inferior)"))
+
+TEST3 <- TEST2[!TEST2$effects=="RVr" & !TEST2$effects=="OVg" & !TEST2$effects=="cRT",] 
+TEST3$isSig <- rep("*", length(TEST3$Estimate))
+TEST3$isSig[TEST3[,5]>0.05] <- NA_real_ 
+TEST3$isSig2 <- TEST3$isSig
+TEST3$isSig2[TEST3[,5]<0.01]<- "**" 
+TEST3$isSig2[TEST3[,5]<0.001]<- "***" 
+EFFPLOTIA <- ggplot(data=TEST3, aes(x=Region, y=Estimate, fill=effects, group=effects, color=effects, shape=effects)) + geom_point(size=5)+theme_bw(14)+ scale_color_manual(values=c("#313A90", "#70AD47", "#88d356"))+
+  geom_errorbar(aes(max = Estimate + se, min = Estimate -se), width=0.1)+scale_shape_manual(values = c(19, 15, 18))+ 
+  xlab("") + ylab("Regression Coefficient") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + 
+ geom_hline(yintercept = 0, size=0.2,linetype=2, color="black") +
+  geom_text(aes(label=isSig2, y=0.6), size=6,show.legend = F) 
+
+EFFPLOTIA
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/BARTRAROIEFFECTS_chosen_vs_unchosen_all_Regions_Str.pdf", width = 6, height = 4)
+EFFPLOTIA
+dev.off()
+```
+
+### 3) Set Appraisal  
+
+#### Value network
+
+```{r echo=TRUE}
+BWBACallInModLik0 <- lmer(binConjunc_PvNxDECxRECxMONxPRI~ cLiking+(cLiking|subj_idx), data = a1fMRI,
+                                         REML=FALSE)
+
+sv1_max <- svd(getME(BWBACallInModLik0, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+tab_model(BWBACallInModLik0,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("BOLD Activity Value Network"), pred.labels= c("(Intercept)", "Liking"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+#### Constituting regions of the value network
+
+```{r echo=TRUE}
+BWvMPFCLikMod <- lmer(BARTRA_vmPFC~ cLiking+(1|subj_idx), data = a1fMRI,
+                                     REML=FALSE)
+
+sv1_max <- svd(getME(BWvMPFCLikMod, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+BWStrLikMod <- lmer(BARTRA_NAcc~ cLiking+(1|subj_idx), data = a1fMRI,
+                                   REML=FALSE)
+
+sv1_max <- svd(getME(BWStrLikMod, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+tab_model(BWvMPFCLikMod, BWStrLikMod,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("BOLD Activity vmPFC", "BOLD Activity vStr"), pred.labels= c("(Intercept)", "Liking"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+```
+
+> Is there an interaction with region?
+
+```{r echo=TRUE}
+# test for differences for Liking
+BARTRASubLikMod0 <- lmer(BOLD~ cLiking*Region+(cLiking+Region|subj_idx), data = a2R,
+                                     REML=FALSE)
+sv1_max <- svd(getME(BARTRASubLikMod0, "Tlist")[[1]])
+varience_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+tab_model(BARTRASubLikMod0,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("BOLD Activity vmPFC vs vStr"), pred.labels= c("(Intercept)", "Liking", "Region (linear)", "Region: Liking"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> No, there is no interaction with region.  
+
+#### Follow up Striatal gradient for set appraisal 
+
+**Figure S6**
+
+```{r echo=TRUE}
+library(lmerTest)
+BWFCN_StrCallInModLik <- lmer(FCN_Str~ cLiking+(cLiking|subj_idx), data = a1fMRI,
+                                          REML=FALSE)
+
+sv1_max <- svd(getME(BWFCN_StrCallInModLik, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+## make table part for liking figure
+TEST <- as.data.frame(coef(summary(BWFCN_StrCallInModLik)))
+TEST$effects <- rownames(TEST)
+TEST$se <- TEST[,2]
+TEST$effects<- revalue(TEST$effects, c("(Intercept)"="Intercept", "cLiking"= "Liking"))
+TEST$effects<- ordered(TEST$effects, levels=c("Intercept", "Liking"))
+TEST <- TEST[c(2), ]
+TEST$effects <- factor(TEST$effects) 
+TESTDCLik <- TEST
+
+BWDMN_StrCallInModLik <- lmer(DMN_Str~ cLiking+(cLiking|subj_idx), data = a1fMRI,
+                                          REML=FALSE)
+
+sv1_max <- svd(getME(BWDMN_StrCallInModLik, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+TEST <- as.data.frame(coef(summary(BWDMN_StrCallInModLik)))
+TEST$effects <- rownames(TEST)
+TEST$se <- TEST[,2]
+TEST$effects<- revalue(TEST$effects, c("(Intercept)"="Intercept", "cLiking"= "Liking"))
+TEST$effects<- ordered(TEST$effects, levels=c("Intercept", "Liking"))
+TEST <- TEST[c(2), ]
+TEST$effects <- factor(TEST$effects) 
+TESTVSSLik <- TEST
+
+BWLN_StrCallInModLik <- lmer(LN_Str~ cLiking+(cLiking|subj_idx), data = a1fMRI,
+                                         REML=FALSE)
+
+sv1_max <- svd(getME(BWLN_StrCallInModLik, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+TEST <- as.data.frame(coef(summary(BWLN_StrCallInModLik)))
+TEST$effects <- rownames(TEST)
+TEST$se <- TEST[,2]
+TEST$effects<- revalue(TEST$effects, c("(Intercept)"="Intercept", "cLiking"= "Liking"))
+TEST$effects<- ordered(TEST$effects, levels=c("Intercept", "Liking"))
+TEST <- TEST[c(2), ]
+TEST$effects <- factor(TEST$effects) 
+TESTVSILik <- TEST
+
+detach("package:lmerTest", unload = TRUE)
+
+## add region to table before merging
+TESTDCLik$Region <- rep("Dorsal\n Caudate", length(TESTDCLik$Estimate))
+TESTVSSLik$Region <- rep("Ventral\n Striatum\n (superior)", length(TESTVSSLik$Estimate))
+TESTVSILik$Region <- rep("Ventral\n Striatum\n (inferior)", length(TESTVSILik$Estimate))
+TEST2 <- rbind(TESTDCLik, TESTVSSLik, TESTVSILik)
+TEST2$Region<- ordered(TEST2$Region, levels=c("Dorsal\n Caudate", "Ventral\n Striatum\n (superior)", "Ventral\n Striatum\n (inferior)"))
+
+TEST2$isSig <- rep("*", length(TEST2$Estimate))
+TEST2$isSig[TEST2[,5]>0.05] <- NA_real_ 
+TEST2$isSig2 <- TEST2$isSig
+TEST2$isSig2[TEST2[,5]<0.01]<- "**" 
+TEST2$isSig2[TEST2[,5]<0.001]<- "***" 
+EFFPLOTIA <- ggplot(data=TEST2, aes(x=Region, y=Estimate, fill=effects, group=effects, color=effects, shape=effects)) + geom_point(size=7)+theme_bw(14)+ scale_color_manual(values=c("#FF9900", "#70AD47", "#88d356"))+ylim(-0.01,0.6)+
+  geom_errorbar(aes(max = Estimate + se, min = Estimate -se), width=0.1)+scale_shape_manual(values = c( 15, 16,18))+
+  xlab("") + ylab("Regression Coefficient") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="none")+
+  geom_hline(aes(yintercept=0), size=0.3,linetype=2, color="black")+ 
+  geom_text(aes(label=isSig2, y=0.58), size=12,show.legend = F) 
+
+EFFPLOTIA
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/BASBWfMRI/BARTRAROIEFFECTS_Liking_all_Regions_Str.pdf", width = 6, height = 4)
+EFFPLOTIA
+dev.off()
+```
+
+### 4) Supplemental Analyses
+
+***
+
+#### PCC
+
+**Table S4**  
+
+```{r echo=TRUE}
+BWBACallInModPCC <- lmer(POS_PCC~ isChooseBestTrial+cAvBid+ ChosenvAvRemV +cavGoalValue+ crelGoalvAvRem+cRT+(isChooseBestTrial+cRT|subj_idx), data = a1fMRI,
+                                      REML=FALSE)
+
+sv1_max <- svd(getME(BWBACallInModPCC, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+tab_model(BWBACallInModPCC,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("BOLD Activity PCC"), pred.labels= c("(Intercept)", "Best - Worst Condition" ,"Overall Reward Value", "Relative Reward Value", "Overall Goal Value", "Relative Goal Value", "RT"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+***
+
+#### rACC vs mOFC
+
+
+Is there an interaction with region within vmPFC?
+
+**Table S6**
+
+```{r echo=TRUE}
+a2RVMPFC <- rbind(a1fMRI, a1fMRI)
+
+a2RVMPFC$Region <- rep(c("rACC", "OFC"), each=length(a1fMRI$subj_idx))
+a2RVMPFC$Region <- as.factor(a2RVMPFC$Region)
+a2RVMPFC$Region <- ordered(a2RVMPFC$Region, levels= c("rACC", "OFC"))
+contrasts(a2RVMPFC$Region) <- contr.sdif(2)
+a2RVMPFC$BOLD <- a2RVMPFC$sPOS_rACC
+a2RVMPFC$BOLD[a2RVMPFC$Region=="OFC"] <- a2RVMPFC$sHUvC_mOFC[a2RVMPFC$Region=="OFC"] 
+contrasts(a2RVMPFC$isChooseBestTrial) <- contr.sdif(2)
+library(lmerTest)
+# no significant interactions with Region
+VMPFCSubMod0 <- lmer(BOLD~ (isChooseBestTrial+cAvBid+ ChosenvAvRemV +cavGoalValue+ crelGoalvAvRem)*Region+cRT+(isChooseBestTrial+cRT+Region|subj_idx), data = a2RVMPFC,
+                                     REML=FALSE)
+
+sv1_max <- svd(getME(VMPFCSubMod0, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+xxx <- anova(VMPFCSubMod0)
+row.names(xxx) <- c("Best - Worst Condition","Overall Reward Value", "Relative Reward Value", "Overall Goal Value", "Relative Goal Value", "Region", "RT","Region: Best - Worst Condition", "Region: Overall Reward Value", "Region: Relative Reward Value", "Region: Overall Goal Value", "Region: Relative Goal Value" )
+attributes(xxx)$heading <- NULL
+xxx[, c(1:5)] <- round(xxx[, c(1:5)],2)
+xxx[, 6] <- round(xxx[, 6],3)
+htmlTable(xxx)
+
+
+detach("package:lmerTest", unload = TRUE)
+
+```
+
+> No, there is no significant interaction.
+
+
+**Table S7**
+
+```{r echo=TRUE}
+BWBACallInModrACC <- lmer(POS_rACC~ isChooseBestTrial+cAvBid+ ChosenvAvRemV +cavGoalValue+ crelGoalvAvRem+cRT+(cRT|subj_idx), data = a1fMRI,
+                                        REML=FALSE)
+
+sv1_max <- svd(getME(BWBACallInModrACC, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+BWBACallInModmOFC <- lmer(HUvC_mOFC~ isChooseBestTrial+cAvBid+ ChosenvAvRemV +cavGoalValue+ crelGoalvAvRem+cRT +(cRT|subj_idx), data = a1fMRI,
+                                        REML=FALSE)
+
+sv1_max <- svd(getME(BWBACallInModmOFC, "Tlist")[[1]])
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)
+
+tab_model(BWBACallInModrACC,BWBACallInModmOFC,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("BOLD Activity rACC", "BOLD Activity mOFC"), pred.labels= c("(Intercept)", "Best - Worst Condition" ,"Overall Reward Value", "Relative Reward Value", "Overall Goal Value", "Relative Goal Value", "RT"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+```
+
+
+# Study S0: choose best only 
+
+the original effects: RT in choose best  
+
+Data Prep
+
+```{r echo=TRUE}
+
+a0$subj_idx <- as.factor(a0$subj_idx)
+a0$cgoalvAvRemBid <- scale(a0$MaxvAvRemBid/10, center=TRUE, scale = FALSE)
+a0$cAvBid <- scale(a0$AvBid/10, center=TRUE, scale = FALSE)
+a0$logRT <- log(a0$rt)
+a0$ChosenvAvRemV <- scale(a0$ChosenvAvRemV/10, scale=FALSE, center=TRUE)   
+```
+
+## accuracy
+
+ VD > 0 only
+ 
+```{r echo=TRUE}
+
+Baccmod0 <- glmer(response~ cgoalvAvRemBid+cAvBid+(1|subj_idx), data = a0[!a0$goalvNext==0,], 
+                                 family = binomial)
+
+sv1_max <- svd(getME(Baccmod0, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+```
+
+
+```{r echo=TRUE}
+
+tab_model(Baccmod0, transform= NULL ,show.stat = TRUE, string.stat="z",   dv.labels = c("P(Max Chosen)"), pred.labels= c("(Intercept)", "Value Difference", "Overall Value"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+
+eff_df <- Effect(c("cgoalvAvRemBid"), Baccmod0,xlevels=list(cgoalvAvRemBid=seq(min(a0$cgoalvAvRemBid), max(a0$cgoalvAvRemBid), 0.1)))
+contmain <- as.data.frame(eff_df)
+contmain$cgoalvAvRemBid <- (contmain$cgoalvAvRemBid - min(contmain$cgoalvAvRemBid))*10
+pbacc <- ggplot(data=contmain, aes(x=cgoalvAvRemBid, y=fit)) + geom_line(color="#000000")+theme_bw(12)+ geom_ribbon(data=contmain, aes(x=cgoalvAvRemBid, max = upper, min = lower),alpha=0.3,  inherit.aes = FALSE, show.legend=FALSE)+ #ggtitle("Choose worst")+theme(plot.title = element_text(hjust = 0.5))+ 
+  scale_y_continuous(limits=c(0,1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+ggtitle("choose best")+
+  xlab("Value difference") + ylab("Pr(max chosen)") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")#+ theme(axis.title.x=element_text(hjust= -5))
+pbacc
+
+```
+
+## RT
+
+```{r echo=TRUE}
+BRTmod0 <- lmer(logRT~ cgoalvAvRemBid+cAvBid+(cAvBid|subj_idx), data = a0,
+                               REML=FALSE)
+
+sv1_max <- svd(getME(BRTmod0, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+```
+
+
+```{r echo=TRUE}
+tab_model(BRTmod0,p.val= "kr", show.df = T, transform= NULL ,show.stat = TRUE, string.stat="t",   dv.labels = c("log RT"),pred.labels= c("(Intercept)", "Value Difference", "Overall Value"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+
+eff_df <- Effect(c("cAvBid"), BRTmod0)
+contmain <- as.data.frame(eff_df)
+contmain$cAvBid <- (contmain$cAvBid +0.5)*10
+pASVB <- ggplot(data=contmain, aes(x=cAvBid, y=fit)) + geom_line(color="#000000")+theme_bw(12)+ geom_ribbon(data=contmain, aes(x=cAvBid, max = upper, min = lower),alpha=0.3, inherit.aes = FALSE)+ ylim(0.7, 2)+theme(plot.title = element_text(hjust = 0.5))+ #ggtitle("Choose best")+ 
+  scale_y_continuous(limits=c(0.7, 2), expand=c(0, 0))+ scale_x_continuous(expand=c(0, 0))+xlab("Overall Value ") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")
+
+
+eff_df <- Effect(c("cgoalvAvRemBid"), BRTmod0, xlevels=list(cgoalvAvRemBid=seq(min(a0$cgoalvAvRemBid), max(a0$cgoalvAvRemBid), 0.1) ))
+contmain <- as.data.frame(eff_df)
+#contmain$cgoalvAvRemBid <- contmain$cgoalvAvRemBid - min(contmain$cgoalvAvRemBid)
+
+pVDB <- ggplot(data=contmain, aes(x=cgoalvAvRemBid, y=fit)) + geom_line(color="#000000")+theme_bw(12)+ geom_ribbon(data=contmain, aes(x=cgoalvAvRemBid, max = upper, min = lower),alpha=0.3, inherit.aes = FALSE)+ ylim(0.7, 2)+ ggtitle("")+
+  scale_y_continuous(limits=c(0.7, 2), expand=c(0, 0))+ scale_x_continuous( expand=c(0, 0))+xlab("Relative Value") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")
+multiplot(pVDB, pASVB, cols=1)
+``` 
+
+# Study S1: choose worst only 
+
+
+Data Prep
+
+
+```{r echo=TRUE}
+# 1: center covariates
+a2$cgoalvAvRemBid <- scale(a2$goalvAvRemBid/10, center=TRUE, scale = FALSE)
+a2$cAvBid <- scale(a2$AvBid/10, center=TRUE, scale = FALSE)
+a2$ChosenvAvRemV <- scale(a2$ChosenvAvRemV/10, scale=FALSE, center=TRUE)   
+# 2: make categorical predictors factors and set contrasts
+a2$subj_idx <- as.factor(a2$subj_idx)
+``` 
+
+## accuracy 
+
+```{r echo=TRUE}
+Waccmod0 <- glmer(response~ cgoalvAvRemBid+cAvBid+(1|subj_idx), data = a2[!a2$goalvNext==0,], 
+                                 family = binomial)
+
+sv1_max <- svd(getME(Waccmod0, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+```
+
+
+```{r echo=TRUE}
+tab_model(Waccmod0, transform= NULL ,show.stat = TRUE, string.stat="z",   dv.labels = c("P(Min Chosen)"), pred.labels= c("(Intercept)", "Value Difference", "Overall Value"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+eff_df <- Effect(c("cgoalvAvRemBid"), Waccmod0,xlevels=list(cgoalvAvRemBid=seq(min(a2$cgoalvAvRemBid[!a2$goalvNext==0]), max(a2$cgoalvAvRemBid[!a2$goalvNext==0]), 0.1)))
+contmain <- as.data.frame(eff_df)
+contmain$cgoalvAvRemBid <- (contmain$cgoalvAvRemBid - min(contmain$cgoalvAvRemBid))*10
+pwacc <- ggplot(data=contmain, aes(x=cgoalvAvRemBid, y=fit)) + geom_line(color="#CC0000")+theme_bw(12)+ geom_ribbon(data=contmain, aes(x=cgoalvAvRemBid, max = upper, min = lower), fill="#CC0000",alpha=0.3,  inherit.aes = FALSE, show.legend=FALSE)+ #ggtitle("Choose worst")+theme(plot.title = element_text(hjust = 0.5))+ 
+  scale_y_continuous(limits=c(0,1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+ ggtitle("choose worst")+
+  xlab("Value difference") + ylab("Pr(min chosen)") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")#+ theme(axis.title.x=element_text(hjust= -5))
+
+multiplot(pbacc, pwacc, cols = 2)
+```
+
+
+```{r echo=TRUE}
+pdf("/Users/Romy/Dropbox (Brown)/ShenhavLab/Experiments/bas/Analysis/HDDM/best_worst_between_accuracy.pdf", width = 7, height = 4)#, units = 'cm', res = 200, compression = 'lzw'
+multiplot(pbacc, pwacc, cols = 2)
+dev.off()
+```
+
+## rt
+
+
+```{r echo=TRUE}
+WRTmod0 <- lmer(logRT~ cgoalvAvRemBid+cAvBid+(cAvBid|subj_idx), data = a2,
+                               REML=FALSE)
+
+sv1_max <- svd(getME(WRTmod0, "Tlist")[[1]]) 
+variance_explainned <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+```
+
+```{r echo=TRUE}
+tab_model(WRTmod0,p.val= "kr", show.df = T, transform= NULL ,show.stat = TRUE, string.stat="t",   dv.labels = c("log RT"),pred.labels= c("(Intercept)", "Value Difference", "Overall Value"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+eff_df <- Effect(c("cAvBid"), WRTmod0)
+contmain <- as.data.frame(eff_df)
+contmain$cAvBid <- (contmain$cAvBid +0.5)*10
+pASVW <- ggplot(data=contmain, aes(x=cAvBid, y=fit)) + geom_line(color="#CC0000")+theme_bw(12)+ geom_ribbon(data=contmain, aes(x=cAvBid, max = upper, min = lower), fill="#CC0000",alpha=0.3,  inherit.aes = FALSE, show.legend=FALSE)+ ylim(0.7, 2)+theme(plot.title = element_text(hjust = 0.5))+ #ggtitle("Choose worst")+
+  scale_y_continuous(limits=c(0.7, 2), expand=c(0, 0))+ scale_x_continuous(expand=c(0, 0))+xlab(" ") + ylab(" ") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")#+ theme(axis.title.x=element_text(hjust= -5))
+
+
+eff_df <- Effect(c("cgoalvAvRemBid"), WRTmod0, xlevels=list(cgoalvAvRemBid=seq(min(a2$cgoalvAvRemBid), max(a2$cgoalvAvRemBid), 0.1) ))
+contmain <- as.data.frame(eff_df)
+#contmain$cgoalvAvRemBid <- contmain$cgoalvAvRemBid - min(contmain$cgoalvAvRemBid)
+pVDW <- ggplot(data=contmain, aes(x=cgoalvAvRemBid, y=fit)) + geom_line(color="#CC0000")+theme_bw(12)+ geom_ribbon(data=contmain, aes(x=cgoalvAvRemBid, max = upper, min = lower), fill="#CC0000",alpha=0.3, inherit.aes = FALSE, show.legend=FALSE)+ylim(0.7, 2)+ ggtitle("")+
+  scale_y_continuous(limits=c(0.7, 2), expand=c(0, 0))+ scale_x_continuous(expand=c(0, 0))+xlab(" ") + ylab(" ") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="bottom")#+ theme(axis.title.x=element_text(hjust= -5))
+
+multiplot(pVDB, pASVB, pVDW, pASVW,  cols=2)
+```
+
+
+```{r echo=TRUE}
+
+pdf("/Users/Romy/Dropbox (Brown)/ShenhavLab/Experiments/bas/Analysis/HDDM/best_worst_between.pdf", width = 7, height = 8)#, units = 'cm', res = 200, compression = 'lzw'
+multiplot(pVDB, pASVB, pVDW, pASVW,  cols=2)
+dev.off()
+``` 
+
+# Study S2: best vs worst within, incentivized
+
+data prep
+
+```{r echo=TRUE}
+# 1: center covariates
+a118$cgoalvAvRemBid <- scale(a118$goalvAvRemBid/10, center=TRUE, scale = FALSE)                  ## unsigned value difference (max/min vs average remaining)
+a118$cgoalvNext <- scale(a118$goalvNext, center=TRUE, scale = FALSE)
+a118$cAvBid <- scale(a118$AvBid/10, center=TRUE, scale = FALSE)
+a118$cRT <- scale(a118$logRT, center=TRUE, scale=FALSE)
+#a118$cChosenvAvRemV <- scale(a118$ChosenvAvRemV, center= TRUE, scale=FALSE)
+a118$Liking <- scale(a118$tmpAllLrateAllTrials, scale=FALSE, center=TRUE)
+a118$avGoalValue <- a118$AvBid                                                                ## the value of the set relative to the goal
+a118$avGoalValue[a118$isChooseBestTrial==0] <- (a118$AvBid [a118$isChooseBestTrial==0]*-1) +10
+a118$cavGoalValue <- scale(a118$avGoalValue/10, scale=FALSE, center= TRUE)
+a118$goalChosenV <- a118$ChosenV                                                              ## the value of the chosen Item relativ to goal
+a118$goalChosenV[a118$isChooseBestTrial==0] <- (a118$ChosenV[a118$isChooseBestTrial==0]*-1) +10
+a118$cgoalChosenV <- scale(a118$goalChosenV, scale=FALSE, center= TRUE)
+a118$cChosenV <- scale(a118$ChosenV, scale=FALSE, center=TRUE)
+a118$avUnchV <- a118$SumUnchV/3                                                               ## average of the unchosen values
+a118$cavUnchV <- scale(a118$avUnchV, scale=FALSE, center=TRUE)
+a118$avgoalUnchV <- a118$avUnchV                                                              ## average of unchosen values relative to goal
+a118$avgoalUnchV[a118$isChooseBestTrial==0] <- (a118$avUnchV[a118$isChooseBestTrial==0]*-1) +10
+a118$cavgoalUnchV <- scale(a118$avgoalUnchV, scale=FALSE, center=TRUE)
+a118$relGoalvAvRem <- a118$goalChosenV - a118$avgoalUnchV                                       ## goal related chosen vs unchosen (negative Values are suboptimal choices) 
+a118$crelGoalvAvRem <- scale(a118$relGoalvAvRem/10, scale=FALSE, center=TRUE)
+a118$goalVal <- a118$MaxBid
+a118$goalVal[a118$isChooseBestTrial==0] <- a118$MinBid[a118$isChooseBestTrial==0]
+a118$cgoalVal <- scale(a118$goalVal, scale=FALSE, center=TRUE)                               ## goal Value (best matching value in set relative to goal)
+a118$rewSpgoalvAvRem <- a118$goalVal - a118$avUnchV                                            ## goal v av rem in bid space
+a118$crewSpgoalvAvRem <- scale(a118$rewSpgoalvAvRem/10, scale=FALSE, center=TRUE) 
+a118$Prgoalcons <- a118$goalVal
+a118$Prgoalcons[a118$isChooseBestTrial==0] <- 10 - a118$MinBid[a118$isChooseBestTrial==0]        ## this is a terrible variable name, but that's the revalued goal value
+a118$cChosenvAvRemV <- scale(a118$ChosenvAvRemV/10, scale=FALSE, center=TRUE)   
+a118$chosenvsnext <- a118$ChosenV - a118$allTrProdBid2
+
+# 2: make categorical predictors factors and set contrasts
+a118$subj_idx <- as.factor(a118$subj_idx)
+a118$isChooseBestTrial <- as.factor(a118$isChooseBestTrial)
+contrasts(a118$isChooseBestTrial) <- contr.sdif(2)
+a118$block <- rep(1, length(a118$subj_idx))
+a118$block[a118$Trial > 60] <- 2
+a118$block <- as.factor(a118$block)
+contrasts(a118$block) <- contr.sdif(2)
+a118$CondType <- as.factor(a118$CondType)
+a118$CondType <- revalue(a118$CondType, c("1"="mixed", "2"="low", "3"="medium", "4"="high"))
+
+
+## exclude trials with RT longer than 30s
+as <- a118
+a118 <- a118[a118$rt<30 & !a118$subj_idx==1201,]
+```
+
+## accuracy 
+
+```{r echo=TRUE}
+BWaccmod0t1 <- glmer(response~ cgoalvAvRemBid*isChooseBestTrial+cAvBid+(1|subj_idx), data = a118[!a118$goalvNext==0,], #
+                                    family = binomial)
+
+sv1_max <- svd(getME(BWaccmod0, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+
+tab_model(BWaccmod0t1, transform= NULL ,show.stat = TRUE, string.stat="z",   dv.labels = c("P(Goal Chosen)"), pred.labels= c("(Intercept)", "Value Difference","Best - Worst Conditon", "Overall Value", "Value Difference:Best - Worst Conditon"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> no significant interactions, so excluding interaction term
+
+```{r echo=TRUE}
+BWaccmod0 <- glmer(response~ cgoalvAvRemBid+isChooseBestTrial+cAvBid+(1|subj_idx), data = a118[!a118$goalvNext==0,], #
+                                  family = binomial)
+
+sv1_max <- svd(getME(BWaccmod0, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(BWaccmod0, transform= NULL ,show.stat = TRUE, string.stat="z",   dv.labels = c("P(Goal Chosen)"), pred.labels= c("(Intercept)", "Value Difference","Best - Worst Conditon", "Overall Value"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"),BWaccmod0, xlevels=list(cgoalvAvRemBid=seq(min(a118$cgoalvAvRemBid), max(a118$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+IA$cgoalvAvRemBid <- (IA$cgoalvAvRemBid - min(IA$cgoalvAvRemBid))*10
+
+## with CI instead of se
+pBWacc <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cgoalvAvRemBid, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous( expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("value difference") + ylab("Pr(goal chosen)") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.justification=c(1,0), legend.position=c(0.95,0.05))
+
+pBWacc
+
+pdf("/Users/Romy/Dropbox (Brown)/ShenhavLab/Experiments/bas/Analysis/HDDM/best_worst_within_main_accuracy_w_choice_condition_as_color118.pdf", width = 4, height = 4)#, units = 'cm', res = 200, compression = 'lzw'
+pBWacc 
+dev.off()
+
+
+S1BWaccmod0G <- glmer(response~ cgoalvAvRemBid*isChooseBestTrial+cavGoalValue+(isChooseBestTrial|subj_idx), data = a118[!a118$goalvNext==0,], 
+                                  family = binomial) 
+
+sv1_max <- svd(getME(S1BWaccmod0G, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(S1BWaccmod0G, transform= NULL ,show.stat = TRUE, string.stat="z",   dv.labels = c("P(Goal Chosen)"), pred.labels= c("(Intercept)", "Value Difference","Best - Worst Conditon", "Overall Goal Value", "Value Difference:Best - Worst Conditon"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+## rt
+
+> Basic checks
+
+```{r echo=TRUE}
+
+
+meanRTbySubS1 <- ddply(a118, .(subj_idx, isChooseBestTrial), summarise,
+                       mrt    = median(logRT, na.rm=TRUE))
+
+
+ggplot(meanRTbySubS1, aes(isChooseBestTrial,mrt,  color= isChooseBestTrial)) + geom_violin()+geom_boxplot() + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+
+
+ggplot(a118, aes(rt, group =isChooseBestTrial, color=isChooseBestTrial, fill=isChooseBestTrial)) + geom_density(alpha=0.5) + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+
+```
+
+
+> analyses separately for best and worst before putting all in one model
+
+
+```{r echo=TRUE}
+BWRTmod1bBEST <- lmer(logRT~ cgoalvAvRemBid+cAvBid+(1|subj_idx), data = a118[a118$isChooseBestTrial==1,],
+                                     REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod1bBEST, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+
+BWRTmod1bWORST <- lmer(logRT~ cgoalvAvRemBid+cAvBid+(1|subj_idx), data = a118[a118$isChooseBestTrial==0,],
+                                      REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod1bWORST, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(BWRTmod1bBEST,BWRTmod1bWORST, p.val= "kr", show.df = T, transform= NULL ,show.stat = TRUE, string.stat="t",   dv.labels = c("log RT Best", "log RT worst"),pred.labels= c("(Intercept)", "Value Difference", "Overall Value"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> Standard analysis without interaction of choice goal and overall value
+
+```{r echo=TRUE}
+
+# all data no interaction
+BWRTmod0 <- lmer(logRT~ cgoalvAvRemBid+cAvBid+isChooseBestTrial+(isChooseBestTrial|subj_idx), data = a118,
+                                REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod0, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(BWRTmod0,p.val= "kr", show.df = T, transform= NULL ,show.stat = TRUE, string.stat="t",   dv.labels = c("log RT"),pred.labels= c("(Intercept)", "Value Difference", "Overall Value", "Best - Worst Condition"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+
+> all data with interaction
+
+**Table S2**  
+
+```{r echo=TRUE}
+BWRTmod1b <- lmer(logRT~ cgoalvAvRemBid+cAvBid*isChooseBestTrial+(isChooseBestTrial|subj_idx), data = a118,
+                                 REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod1b, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(BWRTmod1b,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Value Difference", "Overall Value", "Best - Worst Condition", "Overall Value: Best - Worst"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> nested model to get by choice goal estimates of overall value
+
+```{r echo=TRUE}
+BWRTmod1bn <- lmer(logRT~ isChooseBestTrial/(cAvBid)+cgoalvAvRemBid+(isChooseBestTrial|subj_idx), data = a118,
+                                  REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod1bn, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+
+tab_model(BWRTmod1bn,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Best - Worst Condition", "Value Difference", "Worst: Overall Value", "Best: Overall Value"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+
+eff_df <- Effect(c("cAvBid", "isChooseBestTrial"), BWRTmod1b)
+IA <- as.data.frame(eff_df)
+IA$cAvBid <- (IA$cAvBid - min(IA$cAvBid))*10
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pASVBW <- ggplot(data=IA, aes(x=cAvBid, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cAvBid, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0.8, 2.1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Overall value") + ylab(" ") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+ theme(legend.justification=c(1,1), legend.position=c(0.95,0.25) )
+
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"), BWRTmod1b, xlevels=list(cgoalvAvRemBid=seq(min(a118$cgoalvAvRemBid), max(a118$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+IA$cgoalvAvRemBid <- (IA$cgoalvAvRemBid - min(IA$cgoalvAvRemBid))*10
+## with CI instead of se
+pVDBW <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cgoalvAvRemBid, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0.8, 2.1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Relative Value") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+ theme(legend.position="none" )
+
+multiplot(pVDBW, pASVBW,  cols=2)
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/HDDM/best_worst_within_allRS118.pdf", width = 8, height = 4)#, units = 'cm', res = 200, compression = 'lzw'
+multiplot(pVDBW, pASVBW,  cols=2)
+dev.off()
+```
+
+> goal value instead of reward value
+
+```{r echo=TRUE}
+BWRTmod1g <- lmer(logRT~ cgoalvAvRemBid+cavGoalValue+isChooseBestTrial+(isChooseBestTrial|subj_idx), data = a118,
+                                 REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod1g, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+
+tab_model(BWRTmod1g,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Value Difference", "Overall Goal Value", "Best - Worst Condition"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+
+eff_df <- Effect(c("cavGoalValue", "isChooseBestTrial"), BWRTmod1g)
+IA <- as.data.frame(eff_df)
+IA$cavGoalValue <-(IA$cavGoalValue - min(IA$cavGoalValue))*10
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pASVBW <- ggplot(data=IA, aes(x=cavGoalValue, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cavGoalValue, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0.8, 2.1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Overall value") + ylab(" ") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.justification=c(1,1), legend.position=c(0.95,0.25))
+
+eff_df <- Effect(c("cgoalvAvRemBid", "isChooseBestTrial"), BWRTmod1g, xlevels=list(cgoalvAvRemBid=seq(min(a118$cgoalvAvRemBid), max(a118$cgoalvAvRemBid), 0.1)))
+IA <- as.data.frame(eff_df)
+IA$cgoalvAvRemBid <- (IA$cgoalvAvRemBid - min(IA$cgoalvAvRemBid))*10
+IA$isChooseBestTrial<- revalue(IA$isChooseBestTrial, c("0"="worst", "1"="best"))
+
+## with CI instead of se
+pVDBW <- ggplot(data=IA, aes(x=cgoalvAvRemBid, y=fit , color=isChooseBestTrial )) + geom_line()+scale_colour_manual(name="Goal",values=c("#CC0000","#000000")) +theme_bw(12)+ geom_ribbon(data=IA, aes(x=cgoalvAvRemBid, max = upper, min = lower, fill = isChooseBestTrial),alpha=0.3, inherit.aes = FALSE)+
+  scale_y_continuous(limits=c(0.8, 2.1), expand=c(0, 0))+ scale_x_continuous(limits=c(0, 10), expand=c(0, 0))+scale_fill_manual(name="Goal",values=c("#CC0000","#000000")) + xlab("Relative Value") + ylab("log RT") + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + theme(legend.position="none" )
+multiplot( pVDBW,pASVBW, cols=2)
+
+pdf("~/Dropbox (Brown)/ShenhavLab/experiments/bas/Analysis/HDDM/best_worst_within_allGS118.pdf", width = 8, height = 4)#, units = 'cm', res = 200, compression = 'lzw'
+multiplot( pVDBW,pASVBW, cols=2)
+dev.off()
+```
+
+> testing for residual OV effects
+
+```{r echo=TRUE}
+BWRTmod1allin <- lmer(logRT~ cgoalvAvRemBid+cavGoalValue+ cAvBid+isChooseBestTrial+(isChooseBestTrial|subj_idx), data = a118,
+                                     REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmod1allin, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(BWRTmod1allin,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Value Difference", "Overall Goal Value", "Overall Reward Value", "Best - Worst Condition"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+```
+
+> model comparison
+
+**Table S1**  
+
+```{r echo=TRUE}
+BWRTmodbase <- lmer(logRT~ cgoalvAvRemBid+isChooseBestTrial+(isChooseBestTrial|subj_idx), data = a118,
+                                   REML=FALSE)
+
+sv1_max <- svd(getME(BWRTmodbase, "Tlist")[[1]]) 
+variance_explained <- round(sv1_max$d^2/sum(sv1_max$d^2)*100, 1)  
+
+tab_model(BWRTmodbase,p.val= "kr", show.df = T ,show.stat = TRUE, string.stat="t", dv.labels = c("log RT"), pred.labels= c("(Intercept)", "Value Difference", "Best - Worst Condition"), col.order = c("est", "se","ci",  "stat","df", "p")) 
+
+
+xxx <- anova(BWRTmod0, BWRTmod1b, BWRTmod1g, BWRTmodbase)
+row.names(xxx) <- c("VD + C<sub>b-w</sub> (baseline)", "baseline + OV<sub>reward</sub>", "baseline + OV<sub>goal</sub>", "baseline + C<sub>b-w</sub>: OV<sub>reward</sub>")
+attributes(xxx)$heading <- NULL
+xxx2 <- xxx#[, c(1,2, 6, 7, 8)]
+xxx2$AIC <- round(xxx2$AIC)
+xxx2$BIC <- round(xxx2$BIC)
+xxx2$Chisq <- round(xxx2$Chisq,2)
+xxx2[,8] <- round(xxx2[,8],3)
+xxx2$logLik <- xxx2$AIC - c(NaN, xxx2$AIC[1:length(xxx2$AIC)-1]) 
+allR2s <- rsquared(list(BWRTmodbase,BWRTmod0, BWRTmod1b, BWRTmod1g))
+xxx2[,1] <- round(allR2s$Conditional,2)
+xxx2 <- xxx2[, c(1:4, 6, 8)]
+colnames(xxx2) <- c("R<sup>2</sup>", "AIC", "BIC", "dAIC", "Chi<sup>2</sup>", "p")
+htmlTable(xxx2)
+
+```
